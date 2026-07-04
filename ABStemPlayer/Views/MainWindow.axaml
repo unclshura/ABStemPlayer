@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:vm="using:ABStemPlayer.ViewModels"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:ABStemPlayer.Views"
+        xmlns:conv="using:ABStemPlayer.Converters"
+        mc:Ignorable="d"
+        x:Class="ABStemPlayer.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Width="1280"
+        Height="720"
+        Icon="/Assets/avalonia-logo.ico"
+        Title="AB Stem Player">
+    
+    <Window.Resources>
+        <conv:TimeSpanToStringConverter x:Key="TimeSpanToStringConverter" />
+    </Window.Resources>
+
+    <Grid RowDefinitions="Auto,*,Auto"
+          ColumnDefinitions="*,Auto">
+
+        <!-- Playback + transport + speed + AB loop -->
+        <local:PlaybackControls Grid.Row="2"
+                                Grid.Column="0"
+                                Grid.ColumnSpan="2"
+                                Margin="8"
+                                DataContext="{Binding Playback}" />
+
+        <!-- Mixer console -->
+        <local:MixerControl Grid.Row="1"
+                            Grid.Column="1"
+                            Margin="8"
+                            DataContext="{Binding Mixer}" />
+
+        <!-- Waveform area (per band) -->
+        <Grid Grid.Row="1"
+              Grid.Column="0"
+              Margin="8">
+
+            <ScrollViewer Grid.Row="1"
+                          Grid.Column="0"
+                          Margin="8"
+                          VerticalScrollBarVisibility="Auto">
+
+                <ItemsControl ItemsSource="{Binding Bands}"
+                              Margin="0,2">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Vertical"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <local:WaveformBandView Margin="0,2"/>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+            </ScrollViewer>
+        </Grid>
+
+        <!-- Status / transport time etc -->
+        <DockPanel Grid.Row="0"
+                  Grid.ColumnSpan="2"
+                  Background="#202020"
+                  >
+            <TextBlock Text="{Binding Playback.CurrentTime, Converter={StaticResource TimeSpanToStringConverter}}"
+                       Foreground="#e0e0e0"
+                       DockPanel.Dock="Left"
+                       Margin="8,0" />
+
+            <TextBlock Text="{Binding Playback.TotalTime, Converter={StaticResource TimeSpanToStringConverter}}"
+                       Foreground="#c0c0c0"
+                       DockPanel.Dock="Left"
+                       Margin="8,0" />
+
+            <!--TextBlock Text="{Binding Playback.CurrentSegmentDescription}"
+                       Foreground="#c0c0c0"
+                       DockPanel.Dock="Right"
+                       Margin="8,0" /-->
+        </DockPanel>
+
+    </Grid>
+</Window>

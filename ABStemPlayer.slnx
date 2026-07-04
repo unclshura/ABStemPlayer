@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".copilot/copilot-instructions.md" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="LICENSE.txt" />
+  </Folder>
+  <Project Path="ABStemPlayer/ABStemPlayer.csproj" Id="74fea350-33d3-4b4d-8f07-5c5be997046c" />
+  <Project Path="AudioCore/AudioCore.csproj" />
+  <Project Path="AudioCore_Tests/AudioCore_Tests.csproj" Id="aa371ed7-89c5-4742-8280-748e2f68926f" />
+</Solution>

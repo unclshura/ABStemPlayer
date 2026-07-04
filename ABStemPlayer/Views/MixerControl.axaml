@@ -1,0 +1,83 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ABStemPlayer.ViewModels"
+             x:DataType="vm:MixerViewModel"
+             xmlns:conv="using:ABStemPlayer.Converters"
+             x:Class="ABStemPlayer.Views.MixerControl">
+
+    <UserControl.Resources>
+        <conv:StemTypeToNameConverter x:Key="StemTypeToNameConverter"/>
+    </UserControl.Resources>
+
+    <Border Padding="8"
+            Background="#202020"
+            CornerRadius="4">
+
+        <!-- Dynamic stems -->
+        <ItemsControl ItemsSource="{Binding Stems}">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal"
+                                Spacing="16"/>
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+
+            <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:StemChannelViewModel">
+
+                    <!-- One mixer column -->
+                    <Grid Width="80"
+                          RowDefinitions="Auto,*,Auto,Auto,Auto">
+
+                        <!-- Stem name -->
+                        <TextBlock Grid.Row="0"
+                                   Text="{Binding Type, Converter={StaticResource StemTypeToNameConverter}}"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,0,0,4"
+                                   Foreground="#f0f0f0"/>
+
+                        <!-- Gain slider -->
+                        <Slider Grid.Row="1"
+                                Orientation="Vertical"
+                                Minimum="-24"
+                                Maximum="12"
+                                Value="{Binding GainDb}"
+                                VerticalAlignment="Stretch"
+                                MinHeight="100"/>
+
+                        <!-- Gain readout -->
+                        <TextBlock Grid.Row="2"
+                                   Text="{Binding GainDb, StringFormat='{}{0:F1} dB'}"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,4,0,4"
+                                   Foreground="#c0c0c0"/>
+
+                        <!-- Pan slider -->
+                        <Slider Grid.Row="3"
+                                Orientation="Horizontal"
+                                Minimum="-1"
+                                Maximum="1"
+                                Value="{Binding Pan}"
+                                Margin="0,4,0,0"/>
+
+                        <!-- Pan + enabled -->
+                        <StackPanel Grid.Row="4"
+                                    Orientation="Vertical"
+                                    HorizontalAlignment="Center">
+                            <TextBlock Text="Pan"
+                                       HorizontalAlignment="Center"
+                                       Foreground="#c0c0c0"
+                                       Margin="0,2,0,2"/>
+                            <ToggleSwitch IsChecked="{Binding Enabled}"
+                                          Content="On"
+                                          HorizontalAlignment="Center"
+                                          Margin="0,4,0,0"/>
+                        </StackPanel>
+
+                    </Grid>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+    </Border>
+</UserControl>
