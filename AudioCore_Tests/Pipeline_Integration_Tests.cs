@@ -72,9 +72,9 @@ public sealed class Pipeline_Integration_Tests
             $"\"{outFlac}\"",
             RedirectStandardInput = true,
             RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden,
+            UseShellExecute       = false,
+            CreateNoWindow        = true,
+            WindowStyle           = ProcessWindowStyle.Hidden,
         };
 
         using var ff = Process.Start(psi);

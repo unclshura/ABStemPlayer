@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
+using NAudio.Dmo;
 using NAudio.Wave;
 
 namespace AudioCore.Impl;
@@ -11,6 +12,7 @@ public sealed class WasapiOutputDevice : IAudioOutputDevice, IDisposable
     private readonly BufferedWaveProvider _buffer;
     private readonly WaveFormat           _mixFormat = null!;
     private readonly ByteBufferPool       _pool;
+    private readonly bool                 _isFloat;
 
     public int SampleRate { get; }
     public int Channels { get; }
@@ -51,16 +53,18 @@ public sealed class WasapiOutputDevice : IAudioOutputDevice, IDisposable
         // Use the system mix format (required for shared mode)
         _mixFormat = device.AudioClient.MixFormat;
         SampleRate = _mixFormat.SampleRate;
+        _isFloat   = _mixFormat.Encoding == WaveFormatEncoding.Extensible &&
+               ((WaveFormatExtensible)_mixFormat).SubFormat == AudioMediaSubtypes.MEDIASUBTYPE_IEEE_FLOAT;
 
         // Create buffer in mix format
         _buffer = new BufferedWaveProvider(_mixFormat)
         {
-            BufferLength = _mixFormat.AverageBytesPerSecond * 4, // 4 seconds
+            BufferLength = _mixFormat.AverageBytesPerSecond / 2, // 0.5 seconds
             DiscardOnBufferOverflow = false
         };
 
         // Event-driven WASAPI mode (true = event mode)
-        _out = new WasapiOut(device, AudioClientShareMode.Shared, true, 10);
+        _out = new WasapiOut(device, AudioClientShareMode.Shared, false, 10);
         _out.Init(_buffer);
     }
 
@@ -72,7 +76,7 @@ public sealed class WasapiOutputDevice : IAudioOutputDevice, IDisposable
         // Convert float -> PCM16 or float passthrough depending on mix format
         byte[] bytes;
 
-        if (_mixFormat.Encoding == WaveFormatEncoding.IeeeFloat)
+        if (_isFloat)
         {
             // Device supports float32 directly
             bytes = MemoryMarshal.AsBytes(samples).ToArray();
