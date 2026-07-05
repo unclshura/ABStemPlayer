@@ -41,7 +41,7 @@ public sealed class TimeStretchEngine_Tests
         Assert.AreEqual(44100, output.SampleRate);
 
         // Output should be roughly same size at speed 1.0
-        Assert.IsTrue(output.Frames >= 1000 && output.Frames <= 1300);
+        Assert.AreEqual(5000, output.Frames);
 
         // Validate PCM
         foreach (var f in output.Buffer.Span)
@@ -55,10 +55,10 @@ public sealed class TimeStretchEngine_Tests
     }
 
     [TestMethod]
-    public void Process_Respects_Speed_Change()
+    public void Process_Respects_Speed_Increase()
     {
         using var engine = new RubberBandTimeStretchEngine(_pool, 44100, 2);
-        var input = MakeBlock(25000);
+        var input = MakeBlock(1000);
 
         // Let the engine and FFmpeg warm up with a few calls
         for (var i = 0; i < 5; i++)
@@ -75,12 +75,41 @@ public sealed class TimeStretchEngine_Tests
         var faster = engine.Process(input);
 
         // Don’t insist on > 0; insist on “not more than”
-        Assert.IsLessThanOrEqualTo(normalFrames,
-faster.Frames, $"Speed 1.5 should not increase frame count (normal={normalFrames}, faster={faster.Frames})");
+        Assert.IsLessThanOrEqualTo(normalFrames, faster.Frames, 
+            $"Speed 1.5 should not increase frame count (normal={normalFrames}, faster={faster.Frames})");
 
         input.Dispose();
         normal.Dispose();
         faster.Dispose();
+    }
+
+    [TestMethod]
+    public void Process_Respects_Speed_Decrease()
+    {
+        using var engine = new RubberBandTimeStretchEngine(_pool, 44100, 2);
+        var input = MakeBlock(1000);
+
+        // Let the engine and FFmpeg warm up with a few calls
+        for (var i = 0; i < 5; i++)
+            _ = engine.Process(input);
+
+        var normal = engine.Process(input);
+        var normalFrames = normal.Frames;
+
+        engine.Configure(new PlaybackSpeedSettings { Speed = 0.5f });
+
+        for (var i = 0; i < 5; i++)
+            _ = engine.Process(input);
+
+        var slower = engine.Process(input);
+
+        // Don’t insist on > 0; insist on “not more than”
+        Assert.IsGreaterThanOrEqualTo(normalFrames, slower.Frames,
+            $"Speed 0.5 should not decrease frame count (normal={normalFrames}, slower={slower.Frames})");
+
+        input.Dispose();
+        normal.Dispose();
+        slower.Dispose();
     }
 
 

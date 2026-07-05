@@ -336,7 +336,7 @@ public sealed class StemPlaybackEngine_Tests
         var session = CreateSession(1);
         await engine.LoadSessionAsync(session, new DummyProgressReporter());
 
-        engine.SetSpeed(1.5);
+        engine.CurrentSession!.Speed.Speed = 1.5f;
 
         Assert.IsFalse(output.Started);
     }

@@ -28,6 +28,7 @@ public sealed class WasapiOutputDevice : IAudioOutputDevice, IDisposable
     {
         _pool      = pool;
         _mixFormat = WaveFormat.CreateIeeeFloatWaveFormat(sampleRate, channels);
+        _isFloat   = true;
         SampleRate = sampleRate;
         Channels   = channels;
 

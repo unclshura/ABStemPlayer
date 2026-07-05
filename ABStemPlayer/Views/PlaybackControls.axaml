@@ -40,7 +40,16 @@
                             Grid.Column="0"
                             Margin="0,0,6,0">
                         <Path Fill="#e0e0e0"
-                              Data="M 6 10 H 18 L 22 14 H 34 V 30 H 6 Z"/>
+                              Stretch="None"
+                              RenderTransformOrigin="0,0">
+                            <Path.RenderTransform>
+                                <TranslateTransform X="-8" Y="-8"/>
+                            </Path.RenderTransform>
+
+                            <Path.Data>
+                                M 6 10 H 18 L 22 14 H 34 V 30 H 6 Z
+                            </Path.Data>
+                        </Path>
                     </Button>
 
                     <!-- Rewind -->
@@ -50,7 +59,16 @@
                             Grid.Column="1"
                             Margin="0,0,6,0">
                         <Path Fill="#e0e0e0"
-                              Data="M 30 8 L 10 20 L 30 32 Z M 18 8 L -2 20 L 18 32 Z"/>
+                              Stretch="None"
+                              RenderTransformOrigin="0,0">
+                            <Path.RenderTransform>
+                                <TranslateTransform X="-6" Y="-8"/>
+                            </Path.RenderTransform>
+
+                            <Path.Data>
+                                M 30 8 L 10 20 L 30 32 Z M 18 8 L -2 20 L 18 32 Z
+                            </Path.Data>
+                        </Path>
                     </Button>
 
                     <!-- Play -->
@@ -59,8 +77,17 @@
                             Height="40"
                             Grid.Column="2"
                             Margin="0,0,6,0">
-                        <Path Fill="#00ff00"
-                              Data="M 10 8 L 32 20 L 10 32 Z"/>
+                        <Path Fill="#e0e0e0"
+                              Stretch="None"
+                              RenderTransformOrigin="0,0">
+                            <Path.RenderTransform>
+                                <TranslateTransform X="-8" Y="-8"/>
+                            </Path.RenderTransform>
+
+                            <Path.Data>
+                                M 10 8 L 32 20 L 10 32 Z
+                            </Path.Data>
+                        </Path>
                     </Button>
 
                     <!-- Pause -->
@@ -70,9 +97,18 @@
                             Grid.Column="3"
                             Margin="0,0,6,0">
                         <Path Fill="#e0e0e0"
-                              Data="M 8 8 H 16 V 32 H 8 Z
-                                    M 24 8 H 32 V 32 H 24 Z"/>
-                    </Button>
+                              Stretch="None"
+                              RenderTransformOrigin="0,0">
+                            <Path.RenderTransform>
+                                <TranslateTransform X="-8" Y="-8"/>
+                            </Path.RenderTransform>
+
+                            <Path.Data>
+                                M 8 8 H 16 V 32 H 8 Z
+                                M 24 8 H 32 V 32 H 24 Z
+                            </Path.Data>
+                        </Path>
+                </Button>
 
                     <!-- Stop -->
                     <Button Command="{Binding StopCommand}"
@@ -81,7 +117,16 @@
                             Grid.Column="4"
                             Margin="0,0,6,0">
                         <Path Fill="#e0e0e0"
-                              Data="M 8 8 H 32 V 32 H 8 Z"/>
+                              Stretch="None"
+                              RenderTransformOrigin="0,0">
+                            <Path.RenderTransform>
+                                <TranslateTransform X="-8" Y="-8"/>
+                            </Path.RenderTransform>
+
+                            <Path.Data>
+                                M 8 8 H 32 V 32 H 8 Z
+                            </Path.Data>
+                        </Path>
                     </Button>
 
                     <!-- Fast Forward -->
@@ -90,7 +135,16 @@
                             Height="40"
                             Grid.Column="5">
                         <Path Fill="#e0e0e0"
-                              Data="M 10 8 L 30 20 L 10 32 Z M 22 8 L 42 20 L 22 32 Z"/>
+                              Stretch="None"
+                              RenderTransformOrigin="0,0">
+                            <Path.RenderTransform>
+                                <TranslateTransform X="-14" Y="-8"/>
+                            </Path.RenderTransform>
+
+                            <Path.Data>
+                                M 10 8 L 30 20 L 10 32 Z M 22 8 L 42 20 L 22 32 Z
+                            </Path.Data>
+                        </Path>
                     </Button>
                 </Grid>
 
@@ -165,23 +219,23 @@
                                   StrokeThickness="2"
                                   Fill="Transparent"
                                   Data="
-                                    M 10 2.44 L 18.4 2.44
-                                    A 6 6 0 0 1 24.4 8.44
-                                    A 6 6 0 0 1 18.4 14.44
-                                    L 22 14.44
-                                    A 5.4 5.4 0 0 1 27.4 19.84
-                                    A 5.4 5.4 0 0 1 22 25.24
-                                    L 10 25.24 Z
+                                  M 10 2.44 L 18.4 2.44
+                                  A 6 6 0 0 1 24.4 8.44
+                                  A 6 6 0 0 1 18.4 14.44
+                                  L 22 14.44
+                                  A 5.4 5.4 0 0 1 27.4 19.84
+                                  A 5.4 5.4 0 0 1 22 25.24
+                                  L 10 25.24 Z
 
-                                    M 19 7.24 L 19 10.44
-                                    L 25 10.44
-                                    A 1.2 1.2 0 0 0 26.2 9.24
-                                    A 1.2 1.2 0 0 0 25 7.24 Z
+                                  M 19 7.24 L 19 10.44
+                                  L 25 10.44
+                                  A 1.2 1.2 0 0 0 26.2 9.24
+                                  A 1.2 1.2 0 0 0 25 7.24 Z
 
-                                    M 19 14.44 L 19 19.04
-                                    L 25 19.04
-                                    A 1.8 1.8 0 0 0 26.8 17.24
-                                    A 1.8 1.8 0 0 0 25 14.44 Z
+                                  M 19 14.44 L 19 19.04
+                                  L 25 19.04
+                                  A 1.8 1.8 0 0 0 26.8 17.24
+                                  A 1.8 1.8 0 0 0 25 14.44 Z
                                   "/>
                         </Grid>
                     </Button>

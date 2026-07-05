@@ -115,23 +115,23 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
         {
             FileName = "ffmpeg",
             Arguments =
-            $"-hide_banner -loglevel error " +
-            $"-f f32le -ar {_sampleRate} -ac {_channels} -i pipe:0 " +
-            $"-af \"rubberband=tempo={_speed}\" " +
-            $"-f f32le -ar {_sampleRate} -ac {_channels} pipe:1",
-            RedirectStandardInput = true,
+                $"-hide_banner -loglevel error " +
+                $"-f f32le -ar {_sampleRate} -ac {_channels} -i pipe:0 " +
+                $"-af \"rubberband=tempo={_speed}\" " +
+                $"-f f32le -ar {_sampleRate} -ac {_channels} pipe:1",
+            RedirectStandardInput  = true,
             RedirectStandardOutput = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden,
+            UseShellExecute        = false,
+            CreateNoWindow         = true,
+            WindowStyle            = ProcessWindowStyle.Hidden,
         };
 
-        _ff = System.Diagnostics.Process.Start(psi);
-        _stdin = _ff!.StandardInput.BaseStream;
+        _ff     = System.Diagnostics.Process.Start(psi);
+        _stdin  = _ff!.StandardInput.BaseStream;
         _stdout = _ff!.StandardOutput.BaseStream;
 
         _readerRunning = true;
-        _readerThread = new Thread(ReaderLoop) { IsBackground = true };
+        _readerThread  = new Thread(ReaderLoop) { IsBackground = true };
         _readerThread.Start();
     }
 

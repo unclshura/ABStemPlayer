@@ -15,12 +15,4 @@ public interface IStemPlaybackEngine
     // Loop
     void SetLoop(TimeSpan start, TimeSpan end);
     void ClearLoop();
-
-    // Speed
-    void SetSpeed(double speedFactor);
-
-    // Mixer
-    void SetStemEnabled(int stemNo, bool enabled);
-    void SetStemGain(int stemNo, float gainDb);
-    void SetStemPan(int stemNo, float pan);
 }

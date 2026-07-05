@@ -67,34 +67,52 @@ public sealed partial class PlaybackViewModel : ObservableObject
         IStemWaveformService waveformService
         )
     {
-        _engine          = engine;
-        _separator       = separator;
-        _decoderFactory  = decoderFactory;
-        _waveformService = waveformService;
+        _engine                 = engine;
+        _separator              = separator;
+        _decoderFactory         = decoderFactory;
+        _waveformService        = waveformService;
 
         CancelConversionCommand = new RelayCommand(_ => CancelConversion());
 
         OpenFileCommand         = new AsyncRelayCommand(OpenFileAsync);
-        PlayCommand             = new AsyncRelayCommand(() => _engine.PlayAsync());
+        PlayCommand             = new AsyncRelayCommand(OnPlay);
         PauseCommand            = new AsyncRelayCommand(() => _engine.PauseAsync());
         StopCommand             = new AsyncRelayCommand(async () => { await _engine.StopAsync(); await _engine.SeekAsync(TimeSpan.Zero); });
 
         RewindCommand           = new AsyncRelayCommand(() => _engine.SeekAsync(CurrentTime - TimeSpan.FromSeconds(5)));
         FastForwardCommand      = new AsyncRelayCommand(() => _engine.SeekAsync(CurrentTime + TimeSpan.FromSeconds(5)));
 
-        SetPointACommand        = new RelayCommand(_ =>
+        SetPointACommand = new RelayCommand(_ =>
         {
             _loopA = CurrentTime;
             UpdateLoop();
         });
 
-        SetPointBCommand        = new RelayCommand(_ =>
+        SetPointBCommand = new RelayCommand(_ =>
         {
             _loopB = CurrentTime;
             UpdateLoop();
         });
 
-        
+
+    }
+
+    private async Task OnPlay()
+    {
+        if (_engine.CurrentSession == null)
+            return;
+
+        var mixer = new MixerSettings
+        {
+            Stems = _engine.CurrentSession.StemSet.Stems.Select(GetMixerSettings).ToList()
+        };
+
+        _engine.CurrentSession.Mixer = mixer;
+        _engine.CurrentSession.Speed = new PlaybackSpeedSettings
+        {
+            Speed = PlaybackSpeed
+        };
+        await _engine.PlayAsync();
     }
 
     partial void OnCurrentTimeChanged(TimeSpan value)
@@ -112,6 +130,12 @@ public sealed partial class PlaybackViewModel : ObservableObject
             band.UpdatePlaybackPosition(CurrentTime, TotalTime);
         }
     }
+
+    partial void OnPlaybackSpeedChanged(float value)
+    {
+        _engine.CurrentSession?.Speed.Speed = value;
+    }
+
     // -----------------------------
     // File open + stem conversion
     //------------------------------
@@ -358,18 +382,18 @@ public sealed partial class PlaybackViewModel : ObservableObject
         if ( found != null )
             return new StemMixSettings
             {
-                GainDb = found.GainDb,
+                GainDb  = found.GainDb,
                 Enabled = found.Enabled,
-                Pan = found.Pan
+                Pan     = found.Pan
             };
 
         found = new StemChannelViewModel(stem.Type);
         Mixer.Stems.Add(found);
         return new StemMixSettings
         {
-            GainDb = found.GainDb,
+            GainDb  = found.GainDb,
             Enabled = found.Enabled,
-            Pan = found.Pan
+            Pan     = found.Pan
         };
     }
 
@@ -402,8 +426,4 @@ public sealed partial class PlaybackViewModel : ObservableObject
         }
     }
 
-    public void UpdateSpeed()
-    {
-        _engine.SetSpeed(PlaybackSpeed);
-    }
 }

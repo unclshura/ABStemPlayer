@@ -12,10 +12,8 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
     private PlaybackSession?             _session;
     private IStemDecoder[]               _decoders        = Array.Empty<IStemDecoder>();
 
-    private StemMixSettings[]            _stemMixSettings = Array.Empty<StemMixSettings>();
-    private MixerSettings?               _mixerSettings;
+    private MixerSettings? Mixer => _session?.Mixer;
 
-    private PlaybackSpeedSettings        _speedSettings   = new();
     private LoopRegion                   _loopRegion      = new();
 
     private long                         _currentFramePosition;
@@ -23,9 +21,13 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
     private long                         _loopEndFrames;
 
     private bool                         _isPlaying;
+    private bool                         _outputStarted;
     private CancellationTokenSource?     _renderCts;
     private Task?                        _renderTask;
     private IProgressReporter<TimeSpan>? _progressReporter;
+
+    // Reused per-block list, no per-frame allocation
+    private readonly List<AudioBlock>    _stemBlocks      = new(8);
 
     public StemPlaybackEngine(
         IStemDecoderFactory stemDecoderFactory,
@@ -34,9 +36,9 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
         ITimeStretchEngine timeStretchEngine)
     {
         _stemDecoderFactory = stemDecoderFactory;
-        _outputDevice       = outputDevice;
-        _audioMixer         = audioMixer;
-        _timeStretchEngine  = timeStretchEngine;
+        _outputDevice = outputDevice;
+        _audioMixer = audioMixer;
+        _timeStretchEngine = timeStretchEngine;
     }
 
     public PlaybackSession? CurrentSession
@@ -50,7 +52,7 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
         }
     }
 
-    public async Task LoadSessionAsync(PlaybackSession session, IProgressReporter<TimeSpan  > progress)
+    public async Task LoadSessionAsync(PlaybackSession session, IProgressReporter<TimeSpan> progress)
     {
         await StopAsync().ConfigureAwait(false);
 
@@ -63,17 +65,7 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
                 .Select(stem => _stemDecoderFactory.Create(stem))
                 .ToArray();
 
-            _stemMixSettings = session.Mixer.Stems.ToArray();
-            _mixerSettings = new MixerSettings
-            {
-                Stems = _stemMixSettings
-            };
-
-            _speedSettings = new PlaybackSpeedSettings
-            {
-                Speed = session.Speed.Speed
-            };
-            _timeStretchEngine.Configure(_speedSettings);
+            _timeStretchEngine.Configure(_session.Speed);
 
             _loopRegion = session.Loop;
             if (_loopRegion.IsEnabled)
@@ -109,11 +101,11 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
             {
                 _renderCts?.Dispose();
                 _renderCts = new CancellationTokenSource();
+                _outputStarted = false;
                 _renderTask = Task.Run(() => RenderLoopAsync(_renderCts.Token));
             }
 
             _isPlaying = true;
-            _outputDevice.Start();
         }
 
         return Task.CompletedTask;
@@ -129,7 +121,12 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
             }
 
             _isPlaying = false;
-            _outputDevice.Stop();
+
+            if (_outputStarted)
+            {
+                _outputDevice.Stop();
+                _outputStarted = false;
+            }
         }
 
         return Task.CompletedTask;
@@ -140,6 +137,7 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
         CancellationTokenSource? ctsToCancel;
         IStemDecoder[] decodersToDispose;
         Task? renderTask;
+        bool outputStarted;
 
         lock (_stateLock)
         {
@@ -154,7 +152,13 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
             ctsToCancel = _renderCts;
             _renderCts = null;
 
-            _outputDevice.Stop();
+            outputStarted = _outputStarted;
+            _outputStarted = false;
+
+            if (outputStarted)
+            {
+                _outputDevice.Stop();
+            }
 
             decodersToDispose = _decoders;
             _decoders = Array.Empty<IStemDecoder>();
@@ -168,9 +172,7 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
             ctsToCancel.Cancel();
         }
 
-        // Do NOT wait on renderTask if we are already inside it.
-        // Just let it observe cancellation and exit.
-        if (renderTask is not null && !ReferenceEquals(renderTask, Task.CurrentId))
+        if (renderTask is not null && renderTask.Id != Task.CurrentId)
         {
             try
             {
@@ -241,72 +243,6 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
         }
     }
 
-    public void SetSpeed(double speedFactor)
-    {
-        lock (_stateLock)
-        {
-            _speedSettings.Speed = (float)speedFactor;
-            _timeStretchEngine.Configure(_speedSettings);
-        }
-    }
-
-    public void SetStemEnabled(int stemIndex, bool enabled)
-    {
-        lock (_stateLock)
-        {
-            if (stemIndex < 0 || stemIndex >= _stemMixSettings.Length)
-            {
-                return;
-            }
-
-            var current = _stemMixSettings[stemIndex];
-            _stemMixSettings[stemIndex] = new StemMixSettings
-            {
-                Enabled = enabled,
-                GainDb = current.GainDb,
-                Pan = current.Pan
-            };
-        }
-    }
-
-    public void SetStemGain(int stemIndex, float gainDb)
-    {
-        lock (_stateLock)
-        {
-            if (stemIndex < 0 || stemIndex >= _stemMixSettings.Length)
-            {
-                return;
-            }
-
-            var current = _stemMixSettings[stemIndex];
-            _stemMixSettings[stemIndex] = new StemMixSettings
-            {
-                Enabled = current.Enabled,
-                GainDb = gainDb,
-                Pan = current.Pan
-            };
-        }
-    }
-
-    public void SetStemPan(int stemIndex, float pan)
-    {
-        lock (_stateLock)
-        {
-            if (stemIndex < 0 || stemIndex >= _stemMixSettings.Length)
-            {
-                return;
-            }
-
-            var current = _stemMixSettings[stemIndex];
-            _stemMixSettings[stemIndex] = new StemMixSettings
-            {
-                Enabled = current.Enabled,
-                GainDb = current.GainDb,
-                Pan = pan
-            };
-        }
-    }
-
     private async Task RenderLoopAsync(CancellationToken ct)
     {
         try
@@ -315,51 +251,56 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
             {
                 bool playing;
                 IStemDecoder[] decodersSnapshot;
-                MixerSettings? mixerSettingsSnapshot;
                 long loopStart;
                 long loopEnd;
                 bool loopEnabled;
+                MixerSettings? mixerSnapshot;
+                IProgressReporter<TimeSpan>? progressReporter;
 
                 lock (_stateLock)
                 {
-                    playing               = _isPlaying;
-                    decodersSnapshot      = _decoders;
-                    mixerSettingsSnapshot = _mixerSettings;
-                    loopStart             = _loopStartFrames;
-                    loopEnd               = _loopEndFrames;
-                    loopEnabled           = _loopRegion.IsEnabled;
+                    playing = _isPlaying;
+                    decodersSnapshot = _decoders;
+                    loopStart = _loopStartFrames;
+                    loopEnd = _loopEndFrames;
+                    loopEnabled = _loopRegion.IsEnabled;
+                    mixerSnapshot = Mixer;
+                    progressReporter = _progressReporter;
                 }
 
-                if (!playing || decodersSnapshot.Length == 0 || mixerSettingsSnapshot is null)
+                if (!playing || decodersSnapshot.Length == 0 || mixerSnapshot is null)
                 {
                     await Task.Delay(5, ct).ConfigureAwait(false);
                     continue;
                 }
 
-                List<AudioBlock> stemBlocks = new();
-
-                bool eofDetected = false;
-
-                // Decode once, no double scanning
-                var totalFrames = decodersSnapshot[0].Stem.Duration.TotalSeconds * _outputDevice.SampleRate;
+                _stemBlocks.Clear();
+                var eofDetected = false;
 
                 foreach (var decoder in decodersSnapshot)
                 {
                     if (!decoder.TryDecodeNextBlock(out var block))
                     {
                         eofDetected = true;
-                        foreach (var b in stemBlocks)
-                            b.Dispose();
+
+                        for (var i = 0; i < _stemBlocks.Count; i++)
+                        {
+                            _stemBlocks[i].Dispose();
+                        }
+
+                        _stemBlocks.Clear();
                         break;
                     }
 
-                    stemBlocks.Add(block);
+                    _stemBlocks.Add(block);
                 }
 
-                if (eofDetected || stemBlocks.Count == 0)
+                if (eofDetected || _stemBlocks.Count == 0)
                 {
-                    // Report EOF progress
-                    await _progressReporter!.ReportProgress(TimeSpan.FromSeconds(1.0));
+                    if (progressReporter is not null)
+                    {
+                        await progressReporter.ReportProgress(TimeSpan.FromSeconds(1.0));
+                    }
 
                     lock (_stateLock)
                     {
@@ -369,34 +310,45 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
                     break;
                 }
 
-                // Report progress (0..1)
                 var progress = TimeSpan.FromSeconds((double)_currentFramePosition / _outputDevice.SampleRate);
-                await _progressReporter!.ReportProgress(progress);
-
-                using var mixed = _audioMixer.Mix(stemBlocks, mixerSettingsSnapshot);
-
-                foreach (var block in stemBlocks)
-                    block.Dispose();
-
-                var nextPosition = mixed.SamplePosition + mixed.Frames;
-
-                // Loop region handling
-                if (loopEnabled && loopEnd > loopStart && nextPosition >= loopEnd)
+                if (progressReporter is not null)
                 {
-                    foreach (var decoder in decodersSnapshot)
-                        decoder.Seek(loopStart);
-
-                    lock (_stateLock)
-                    {
-                        _currentFramePosition = loopStart;
-                    }
-
-                    continue;
+                    await progressReporter.ReportProgress(progress);
                 }
+
+                using var mixed = _audioMixer.Mix(_stemBlocks, mixerSnapshot);
+
+                for (var i = 0; i < _stemBlocks.Count; i++)
+                {
+                    _stemBlocks[i].Dispose();
+                }
+                _stemBlocks.Clear();
 
                 using var stretched = _timeStretchEngine.Process(mixed);
 
-                _outputDevice.Write(stretched.Buffer.Span);
+                if (stretched.Buffer != null)
+                {
+                    if (!_outputStarted)
+                    {
+                        _outputDevice.Start();
+                        _outputStarted = true;
+                    }
+
+                    _outputDevice.Write(stretched.Buffer.Span);
+                }
+
+                var nextPosition = mixed.SamplePosition + mixed.Frames;
+
+                if (loopEnabled && loopEnd > loopStart && nextPosition >= loopEnd)
+                {
+                    lock (_stateLock)
+                    {
+                        _currentFramePosition = loopEnd;
+                        _isPlaying = false;
+                    }
+
+                    break;
+                }
 
                 lock (_stateLock)
                 {
@@ -406,7 +358,11 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
         }
         finally
         {
-            _outputDevice.Stop();
+            if (_outputStarted)
+            {
+                _outputDevice.Stop();
+                _outputStarted = false;
+            }
         }
     }
 
