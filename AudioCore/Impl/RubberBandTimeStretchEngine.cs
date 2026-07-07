@@ -6,22 +6,22 @@ namespace AudioCore.Impl;
 public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposable
 {
     private readonly AudioBufferPool _pool;
-    private readonly int _sampleRate;
-    private readonly int _channels;
+    private readonly int             _sampleRate;
+    private readonly int             _channels;
 
-    private FfmpegProcess? _ff;
-    private Stream? _stdin;
-    private Stream? _stdout;
+    private FfmpegProcess?           _ff;
+    private Stream?                  _stdin;
+    private Stream?                  _stdout;
 
-    private float _speed = 1.0f;
+    private float                    _speed = 1.0f;
 
-    private readonly byte[] _ring;
-    private int _ringWrite;
-    private int _ringRead;
-    private readonly object _ringLock = new();
+    private readonly byte[]          _ring;
+    private int                      _ringWrite;
+    private int                      _ringRead;
+    private readonly object          _ringLock = new();
 
-    private Thread? _readerThread;
-    private bool _readerRunning;
+    private Thread?                  _readerThread;
+    private bool                     _readerRunning;
 
     public RubberBandTimeStretchEngine(AudioBufferPool pool, int sampleRate = 44100, int channels = 2)
     {
@@ -31,8 +31,6 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
 
         var bytesPerSecond = sampleRate * channels * sizeof(float);
         _ring = new byte[bytesPerSecond];
-
-        StartProcess();
     }
 
     public void Configure(PlaybackSpeedSettings settings)

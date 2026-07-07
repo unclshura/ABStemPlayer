@@ -129,7 +129,7 @@ public sealed class FfmpegAudioReader_Tests
                 WindowStyle = ProcessWindowStyle.Hidden,
             };
 
-            using (var p = Process.Start(psi))
+            using (var p = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start FFmpeg process"))
             {
                 // Start draining stderr immediately
                 _ = Task.Run(() => DrainStderr(p));

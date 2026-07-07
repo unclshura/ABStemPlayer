@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Text.Json;
 
 namespace AudioCore.Impl;
 
@@ -23,6 +24,8 @@ public sealed class FfmpegProcess : IDisposable
 
     public void StartProcess()
     {
+        Debug.WriteLine($"{_name}: Starting ffmpeg process");
+
         var psi = new ProcessStartInfo
         {
             FileName               = "ffmpeg",
@@ -81,38 +84,17 @@ public sealed class FfmpegProcess : IDisposable
         return readBytes / sizeof(float);
     }
 
-    public static long ProbeTotalSamples(string path, int sampleRate)
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName               = "ffprobe",
-            Arguments              = $"-v error -show_entries format=duration -of csv=p=0 \"{path}\"",
-            RedirectStandardOutput = true,
-            CreateNoWindow         = true,
-            WindowStyle            = ProcessWindowStyle.Hidden,
-            UseShellExecute        = false
-        };
-
-        using var p = Process.Start(psi);
-        var s = p!.StandardOutput.ReadToEnd();
-        p.WaitForExit();
-
-        if (double.TryParse(s, System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var seconds))
-        {
-            return (long)(seconds * sampleRate);
-        }
-
-        return 0;
-    }
 
     private void DisposeProcessOnly()
     {
-        try { Stdout?.Dispose(); } catch { }
-        try { Stdin?.Dispose(); } catch { }
-        try { Proc?.StandardError.BaseStream?.Dispose(); } catch { }
+        if (Proc != null)
+            Debug.WriteLine($"{_name}: Disposing ffmpeg process");
+
+        try { Stdout?.Dispose(); Stdout = null;                 } catch { }
+        try { Stdin?.Dispose(); Stdin = null;                   } catch { }
+        try { Proc?.StandardError.BaseStream?.Dispose();        } catch { }
         try { if (Proc != null && !Proc.HasExited) Proc.Kill(); } catch { }
-        try { Proc?.Dispose(); } catch { }
+        try { Proc?.Dispose(); Proc = null;                     } catch { }
     }
 
     public void Dispose()
