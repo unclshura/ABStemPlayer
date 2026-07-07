@@ -79,6 +79,8 @@ public sealed class Pipeline_Integration_Tests
 
         using var ff = Process.Start(psi);
         var stdin = ff!.StandardInput.BaseStream;
+        // Start draining stderr immediately
+        _ = Task.Run(() => DrainStderr(ff));
 
         var running = true;
 
@@ -127,5 +129,25 @@ public sealed class Pipeline_Integration_Tests
         var read = verify.Read(buf, 0, buf.Length);
 
         Assert.IsGreaterThan(0, read, "FLAC output is not decodable");
+    }
+
+    private static void DrainStderr(Process proc)
+    {
+        try
+        {
+            var reader = proc.StandardError;
+
+            // ffmpeg writes short lines, so ReadLine is fine
+            // If you want zero allocations, use ReadAsync into a rented buffer.
+            string? line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                Debug.WriteLine(line);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex.ToString());
+        }
     }
 }

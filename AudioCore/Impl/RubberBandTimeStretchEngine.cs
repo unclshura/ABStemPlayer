@@ -9,7 +9,7 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
     private readonly int _sampleRate;
     private readonly int _channels;
 
-    private Process? _ff;
+    private FfmpegProcess? _ff;
     private Stream? _stdin;
     private Stream? _stdout;
 
@@ -29,7 +29,6 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
         _sampleRate = sampleRate;
         _channels = channels;
 
-        // Ring buffer: e.g. 1 second of audio
         var bytesPerSecond = sampleRate * channels * sizeof(float);
         _ring = new byte[bytesPerSecond];
 
@@ -48,17 +47,16 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
     public TimeStretchedAudioBlock Process(MixedAudioBlock input)
     {
         var expectedFloats = input.Frames * _channels;
-        var expectedBytes = expectedFloats * sizeof(float);
+        var expectedBytes  = expectedFloats * sizeof(float);
 
         if (Math.Abs(_speed - 1.0f) < 0.01f)
         {
             var buf = _pool.Rent(expectedFloats);
             Array.Copy(input.Buffer.Samples, buf.Samples, input.Buffer.Length);
-
             return new TimeStretchedAudioBlock(buf, input.Frames, _channels, _sampleRate);
         }
 
-        var span = input.Buffer.Span;
+        var span  = input.Buffer.Span;
         var bytes = MemoryMarshal.AsBytes(span);
 
         _stdin!.Write(bytes);
@@ -68,11 +66,10 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
         if (available <= 0)
             return default;
 
-        var outBuf = _pool.Rent(expectedFloats);
+        var outBuf   = _pool.Rent(expectedFloats);
         var outBytes = MemoryMarshal.AsBytes(outBuf.Span);
 
         var readBytes = DrainRing(outBytes, expectedBytes);
-
         if (readBytes <= 0)
         {
             outBuf.Dispose();
@@ -94,8 +91,8 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
             lock (_ringLock)
             {
                 var available = (_ringWrite >= _ringRead)
-                ? _ringWrite - _ringRead
-                : _ring.Length - _ringRead + _ringWrite;
+                    ? _ringWrite - _ringRead
+                    : _ring.Length - _ringRead + _ringWrite;
 
                 if (available > 0)
                     return available;
@@ -104,37 +101,33 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
             Thread.Sleep(2);
         }
 
+        Debug.WriteLine("Rubberband: Timeout waiting for output from ffmpeg");
         return 0;
     }
 
-
-
     private void StartProcess()
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "ffmpeg",
-            Arguments =
-                $"-hide_banner -loglevel error " +
-                $"-f f32le -ar {_sampleRate} -ac {_channels} -i pipe:0 " +
-                $"-af \"rubberband=tempo={_speed}\" " +
-                $"-f f32le -ar {_sampleRate} -ac {_channels} pipe:1",
-            RedirectStandardInput  = true,
-            RedirectStandardOutput = true,
-            UseShellExecute        = false,
-            CreateNoWindow         = true,
-            WindowStyle            = ProcessWindowStyle.Hidden,
-        };
+        var cmd =
+            $"-hide_banner -loglevel error " +
+            $"-f f32le -ar {_sampleRate} -ac {_channels} -i pipe:0 " +
+            $"-af \"rubberband=tempo={_speed}\" " +
+            $"-f f32le -ar {_sampleRate} -ac {_channels} pipe:1";
 
-        _ff     = System.Diagnostics.Process.Start(psi);
-        _stdin  = _ff!.StandardInput.BaseStream;
-        _stdout = _ff!.StandardOutput.BaseStream;
+        _ff = new FfmpegProcess(
+            name: $"rubberband:{_speed:F3}",
+            commandLine: cmd,
+            redirectOutput: true,
+            redirectInput: true);
+
+        _ff.StartProcess();
+
+        _stdin = _ff.Stdin!;
+        _stdout = _ff.Stdout!;
 
         _readerRunning = true;
-        _readerThread  = new Thread(ReaderLoop) { IsBackground = true };
+        _readerThread = new Thread(ReaderLoop) { IsBackground = true };
         _readerThread.Start();
     }
-
 
     private void RestartProcess()
     {
@@ -152,7 +145,6 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
             while (_readerRunning)
             {
                 var read = _stdout!.Read(buf, 0, buf.Length);
-
                 if (read <= 0)
                     break;
 
@@ -171,7 +163,7 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
                 }
             }
         }
-        catch { /* swallow for now */ }
+        catch { }
     }
 
     private int DrainRing(Span<byte> dest, int maxBytes)
@@ -179,8 +171,8 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
         lock (_ringLock)
         {
             var available = (_ringWrite >= _ringRead)
-            ? _ringWrite - _ringRead
-            : _ring.Length - _ringRead + _ringWrite;
+                ? _ringWrite - _ringRead
+                : _ring.Length - _ringRead + _ringWrite;
 
             if (available <= 0)
                 return 0;
@@ -203,7 +195,6 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
         }
     }
 
-
     private void ResetRing()
     {
         lock (_ringLock)
@@ -216,9 +207,9 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
     private void DisposeProcess()
     {
         _readerRunning = false;
+
         try { _stdout?.Close(); } catch { }
         try { _stdin?.Close(); } catch { }
-        try { _ff?.Kill(); } catch { }
         try { _ff?.Dispose(); } catch { }
 
         if (_readerThread != null)
@@ -226,6 +217,10 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
             try { _readerThread.Join(500); } catch { }
             _readerThread = null;
         }
+
+        _ff = null;
+        _stdin = null;
+        _stdout = null;
     }
 
     public void Dispose() => DisposeProcess();

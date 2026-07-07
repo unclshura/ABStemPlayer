@@ -131,6 +131,9 @@ public sealed class FfmpegAudioReader_Tests
 
             using (var p = Process.Start(psi))
             {
+                // Start draining stderr immediately
+                _ = Task.Run(() => DrainStderr(p));
+
                 p!.WaitForExit();
                 Assert.AreEqual(0, p.ExitCode, "FFmpeg failed to convert MP3 to FLAC");
             }
@@ -201,6 +204,26 @@ public sealed class FfmpegAudioReader_Tests
                     File.Delete(flacPath);
             }
             catch { /* swallow */ }
+        }
+    }
+
+    private static void DrainStderr(Process proc)
+    {
+        try
+        {
+            var reader = proc.StandardError;
+
+            // ffmpeg writes short lines, so ReadLine is fine
+            // If you want zero allocations, use ReadAsync into a rented buffer.
+            string? line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                Debug.WriteLine(line);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex.ToString());
         }
     }
 
