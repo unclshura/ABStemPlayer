@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace AudioCore.Impl;
@@ -13,24 +14,20 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
     private Stream?                  _stdin;
     private Stream?                  _stdout;
 
+    private BlockingRingBuffer       _ring;
     private float                    _speed = 1.0f;
-
-    private readonly byte[]          _ring;
-    private int                      _ringWrite;
-    private int                      _ringRead;
-    private readonly object          _ringLock = new();
 
     private Thread?                  _readerThread;
     private bool                     _readerRunning;
 
     public RubberBandTimeStretchEngine(AudioBufferPool pool, int sampleRate = 44100, int channels = 2)
     {
-        _pool = pool;
-        _sampleRate = sampleRate;
-        _channels = channels;
+        _pool              = pool;
+        _sampleRate        = sampleRate;
+        _channels          = channels;
 
         var bytesPerSecond = sampleRate * channels * sizeof(float);
-        _ring = new byte[bytesPerSecond];
+        _ring              = new BlockingRingBuffer(1 * bytesPerSecond);
     }
 
     public void Configure(PlaybackSpeedSettings settings)
@@ -39,20 +36,32 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
             return;
 
         _speed = settings.Speed;
-        RestartProcess();
-    }
-
-    public TimeStretchedAudioBlock Process(MixedAudioBlock input)
-    {
-        var expectedFloats = input.Frames * _channels;
-        var expectedBytes  = expectedFloats * sizeof(float);
 
         if (Math.Abs(_speed - 1.0f) < 0.01f)
         {
-            var buf = _pool.Rent(expectedFloats);
-            Array.Copy(input.Buffer.Samples, buf.Samples, input.Buffer.Length);
-            return new TimeStretchedAudioBlock(buf, input.Frames, _channels, _sampleRate);
+            DisposeProcess();
+            _ring.ResetRing();
         }
+        else
+        {
+            RestartProcess();
+        }
+    }
+
+    public Task Submit(MixedAudioBlock input)
+    {
+        // No-stretch path: enqueue block and signal semaphore
+        if (Math.Abs(_speed - 1.0f) < 0.01f)
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var b = MemoryMarshal.AsBytes(input.Buffer.Span);
+            _ring.WriteToOutput(b, b.Length, cts.Token);
+
+            return Task.CompletedTask;
+        }
+
+        if (_ff is null)
+            StartProcess();
 
         var span  = input.Buffer.Span;
         var bytes = MemoryMarshal.AsBytes(span);
@@ -60,17 +69,35 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
         _stdin!.Write(bytes);
         _stdin.Flush();
 
-        var available = WaitForOutput();
-        if (available <= 0)
+        return Task.CompletedTask;
+    }
+
+    public async Task<TimeStretchedAudioBlock> Receive()
+    {
+        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        int available = 0;
+        while (!cts.IsCancellationRequested)
+        {
+            available = _ring.WaitForOutput(cts.Token);
+            if (available > 0)
+                break;
+
+            await Task.Delay(2).ConfigureAwait(false);
+        }
+
+        if (cts.IsCancellationRequested)
             return default;
 
-        var outBuf   = _pool.Rent(expectedFloats);
-        var outBytes = MemoryMarshal.AsBytes(outBuf.Span);
+        var maxFloats = available / sizeof(float);
+        var outBuf    = _pool.Rent(maxFloats);
+        var outBytes  = MemoryMarshal.AsBytes(outBuf.Span);
 
-        var readBytes = DrainRing(outBytes, expectedBytes);
+        var readBytes = _ring.DrainRing(outBytes, outBytes.Length);
         if (readBytes <= 0)
         {
             outBuf.Dispose();
+            Debug.WriteLine("RubberBandTimeStretchEngine: Failed to drain ring buffer.");
             return default;
         }
 
@@ -80,28 +107,6 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
         return new TimeStretchedAudioBlock(outBuf, frames, _channels, _sampleRate);
     }
 
-    private int WaitForOutput(int timeoutMs = 5000)
-    {
-        var sw = Stopwatch.StartNew();
-
-        while (sw.ElapsedMilliseconds < timeoutMs)
-        {
-            lock (_ringLock)
-            {
-                var available = (_ringWrite >= _ringRead)
-                    ? _ringWrite - _ringRead
-                    : _ring.Length - _ringRead + _ringWrite;
-
-                if (available > 0)
-                    return available;
-            }
-
-            Thread.Sleep(2);
-        }
-
-        Debug.WriteLine("Rubberband: Timeout waiting for output from ffmpeg");
-        return 0;
-    }
 
     private void StartProcess()
     {
@@ -130,7 +135,7 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
     private void RestartProcess()
     {
         DisposeProcess();
-        ResetRing();
+        _ring.ResetRing();
         StartProcess();
     }
 
@@ -146,61 +151,13 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
                 if (read <= 0)
                     break;
 
-                lock (_ringLock)
-                {
-                    var first = Math.Min(read, _ring.Length - _ringWrite);
-                    Buffer.BlockCopy(buf, 0, _ring, _ringWrite, first);
-                    _ringWrite = (_ringWrite + first) % _ring.Length;
-
-                    var remaining = read - first;
-                    if (remaining > 0)
-                    {
-                        Buffer.BlockCopy(buf, first, _ring, _ringWrite, remaining);
-                        _ringWrite = (_ringWrite + remaining) % _ring.Length;
-                    }
-                }
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                _ring.WriteToOutput(buf, read, cts.Token);
             }
         }
         catch { }
     }
 
-    private int DrainRing(Span<byte> dest, int maxBytes)
-    {
-        lock (_ringLock)
-        {
-            var available = (_ringWrite >= _ringRead)
-                ? _ringWrite - _ringRead
-                : _ring.Length - _ringRead + _ringWrite;
-
-            if (available <= 0)
-                return 0;
-
-            var toRead = Math.Min(available, Math.Min(maxBytes, dest.Length));
-
-            var first = Math.Min(toRead, _ring.Length - _ringRead);
-            new Span<byte>(_ring, _ringRead, first).CopyTo(dest.Slice(0, first));
-            _ringRead = (_ringRead + first) % _ring.Length;
-
-            var remaining = toRead - first;
-            if (remaining > 0)
-            {
-                new Span<byte>(_ring, _ringRead, remaining)
-                    .CopyTo(dest.Slice(first, remaining));
-                _ringRead = (_ringRead + remaining) % _ring.Length;
-            }
-
-            return toRead;
-        }
-    }
-
-    private void ResetRing()
-    {
-        lock (_ringLock)
-        {
-            _ringWrite = 0;
-            _ringRead = 0;
-        }
-    }
 
     private void DisposeProcess()
     {
@@ -221,5 +178,8 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
         _stdout = null;
     }
 
-    public void Dispose() => DisposeProcess();
+    public void Dispose()
+    {
+        DisposeProcess();
+    }
 }

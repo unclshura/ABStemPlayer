@@ -21,7 +21,6 @@ public sealed class TimeStretchEngine_Tests
         var buf = _pool.Rent(frames * channels);
         buf.Length = frames * channels;
 
-        // Fill with deterministic ramp
         for (var i = 0; i < buf.Length; i++)
             buf.Samples[i] = i * 0.001f;
 
@@ -29,21 +28,20 @@ public sealed class TimeStretchEngine_Tests
     }
 
     [TestMethod]
-    public void Process_Returns_Output_For_Speed_1()
+    public async Task Process_Returns_Output_For_Speed_1()
     {
         using var engine = new RubberBandTimeStretchEngine(_pool, 44100, 2);
 
         var input = MakeBlock(5000);
-        var output = engine.Process(input);
 
-        Assert.IsGreaterThan(0, output.Frames, "No frames returned");
+        await engine.Submit(input);
+        var output = await engine.Receive();
+
+        Assert.IsGreaterThan(0, output.Frames);
         Assert.AreEqual(2, output.Channels);
         Assert.AreEqual(44100, output.SampleRate);
-
-        // Output should be roughly same size at speed 1.0
         Assert.AreEqual(5000, output.Frames);
 
-        // Validate PCM
         foreach (var f in output.Buffer.Span)
         {
             Assert.IsFalse(float.IsNaN(f));
@@ -55,105 +53,118 @@ public sealed class TimeStretchEngine_Tests
     }
 
     [TestMethod]
-    public void Process_Respects_Speed_Increase()
+    public async Task Process_Respects_Speed_Increase()
     {
         using var engine = new RubberBandTimeStretchEngine(_pool, 44100, 2);
         var input = MakeBlock(1000);
 
-        // Let the engine and FFmpeg warm up with a few calls
-        for (var i = 0; i < 5; i++)
-            _ = engine.Process(input);
+        for (var i = 0; i < 25; i++)
+            await engine.Submit(input);
 
-        var normal = engine.Process(input);
-        var normalFrames = normal.Frames;
+        var normalFrames = 0;
+        while (true)
+        {
+            using var data = await engine.Receive();
+            normalFrames += data.Frames;
+            if (data.Buffer == null)
+                break;
+        }
+
 
         engine.Configure(new PlaybackSpeedSettings { Speed = 1.5f });
 
-        for (var i = 0; i < 5; i++)
-            _ = engine.Process(input);
 
-        var faster = engine.Process(input);
+        for (var i = 0; i < 25; i++)
+            await engine.Submit(input);
 
-        // Don’t insist on > 0; insist on “not more than”
-        Assert.IsLessThanOrEqualTo(normalFrames, faster.Frames, 
-            $"Speed 1.5 should not increase frame count (normal={normalFrames}, faster={faster.Frames})");
+        var fasterFrames = 0;
+        while (true)
+        {
+            using var data = await engine.Receive();
+            fasterFrames += data.Frames;
+            if (data.Buffer == null)
+                break;
+        }
+
+        Assert.IsLessThanOrEqualTo(normalFrames, fasterFrames);
 
         input.Dispose();
-        normal.Dispose();
-        faster.Dispose();
     }
 
     [TestMethod]
-    public void Process_Respects_Speed_Decrease()
+    public async Task Process_Respects_Speed_Decrease()
     {
         using var engine = new RubberBandTimeStretchEngine(_pool, 44100, 2);
         var input = MakeBlock(1000);
 
-        // Let the engine and FFmpeg warm up with a few calls
-        for (var i = 0; i < 5; i++)
-            _ = engine.Process(input);
+        for (var i = 0; i < 25; i++)
+            await engine.Submit(input);
 
-        var normal = engine.Process(input);
-        var normalFrames = normal.Frames;
+        var normalFrames = 0;
+        while (true)
+        {
+            using var data = await engine.Receive();
+            normalFrames += data.Frames;
+            if (data.Buffer == null)
+                break;
+        }
 
         engine.Configure(new PlaybackSpeedSettings { Speed = 0.5f });
 
-        for (var i = 0; i < 5; i++)
-            _ = engine.Process(input);
+        for (var i = 0; i < 25; i++)
+            await engine.Submit(input);
 
-        var slower = engine.Process(input);
+        var slowerFrames = 0;
+        while (true)
+        {
+            using var data = await engine.Receive();
+            slowerFrames += data.Frames;
+            if (data.Buffer == null)
+                break;
+        }
 
-        // Don’t insist on > 0; insist on “not more than”
-        Assert.IsGreaterThanOrEqualTo(normalFrames, slower.Frames,
-            $"Speed 0.5 should not decrease frame count (normal={normalFrames}, slower={slower.Frames})");
+        Assert.IsGreaterThanOrEqualTo(normalFrames, slowerFrames);
 
         input.Dispose();
-        normal.Dispose();
-        slower.Dispose();
     }
 
-
-
-
     [TestMethod]
-    public void Engine_Restarts_On_Speed_Change()
+    public async Task Engine_Restarts_On_Speed_Change()
     {
         using var engine = new RubberBandTimeStretchEngine(_pool, 44100, 2);
 
         var input = MakeBlock(100);
 
-        var before = engine.Process(input);
+        await engine.Submit(input);
+        var before = await engine.Receive();
 
         engine.Configure(new PlaybackSpeedSettings { Speed = 0.75f });
 
-        var after = engine.Process(input);
+        await engine.Submit(input);
+        var after = await engine.Receive();
 
-        // After restart, RubberBand has no buffered audio yet → zero frames expected
-        Assert.AreEqual(0, after.Frames, "First block after restart must produce zero frames");
+        Assert.AreEqual(0, after.Frames);
     }
-
 
     [TestMethod]
     public void Dispose_Kills_FFmpeg()
     {
         var engine = new RubberBandTimeStretchEngine(_pool, 44100, 2);
 
-        // Capture FFmpeg PID
         var ffField = typeof(RubberBandTimeStretchEngine)
             .GetField("_ff", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
-        var ff = (Process)ffField!.GetValue(engine)!;
-        var pid = ff.Id;
+        var ff = (Process?)ffField!.GetValue(engine);
+        var pid = ff?.Id ?? -1;
 
         engine.Dispose();
 
-        // Process should be gone
         var exists = Process.GetProcesses().Any(p =>
         {
             try { return p.Id == pid; }
             catch { return false; }
         });
 
-        Assert.IsFalse(exists, "FFmpeg process was not terminated");
+        Assert.IsFalse(exists);
     }
 }

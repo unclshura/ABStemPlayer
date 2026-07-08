@@ -11,5 +11,6 @@ public interface ITimeStretchEngine
     void Configure(PlaybackSpeedSettings settings);
 
     // Streaming block processing
-    TimeStretchedAudioBlock Process(MixedAudioBlock input);
+    Task Submit(MixedAudioBlock input);
+    Task<TimeStretchedAudioBlock> Receive();
 }
