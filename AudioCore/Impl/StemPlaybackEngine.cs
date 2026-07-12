@@ -1,4 +1,6 @@
-﻿namespace AudioCore.Impl;
+﻿using System.Diagnostics;
+
+namespace AudioCore.Impl;
 
 public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 {
@@ -238,7 +240,7 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
         var decodeTask  = DecodeLoopAsync(pipeline, ct);
         var stretchTask = StretchLoopAsync(pipeline, ct);
 
-        await Task.WhenAny(decodeTask, stretchTask);
+        await Task.WhenAny(decodeTask, stretchTask).ConfigureAwait(false);
 
         // When either loop ends, stop output
         if (pipeline.OutputStarted)
@@ -250,6 +252,8 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 
     private async Task DecodeLoopAsync(PipelineState pipeline, CancellationToken ct)
     {
+        await Task.Yield();
+
         try
         {
             while (!ct.IsCancellationRequested)
@@ -263,12 +267,12 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 
                 lock (_stateLock)
                 {
-                    playing = _isPlaying;
-                    mixerSnapshot = Mixer;
+                    playing          = _isPlaying;
+                    mixerSnapshot    = Mixer;
                     decodersSnapshot = pipeline.Decoders;
-                    loopStart = _loopStartFrames;
-                    loopEnd = _loopEndFrames;
-                    loopEnabled = _loopRegion.IsEnabled;
+                    loopStart        = _loopStartFrames;
+                    loopEnd          = _loopEndFrames;
+                    loopEnabled      = _loopRegion.IsEnabled;
                     progressReporter = _progressReporter;
                 }
 
@@ -286,7 +290,8 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
                     if (!decoder.TryDecodeNextBlock(out var block))
                     {
                         eof = true;
-                        foreach (var b in _stemBlocks) b.Dispose();
+                        foreach (var b in _stemBlocks) 
+                            b.Dispose();
                         _stemBlocks.Clear();
                         break;
                     }
@@ -307,7 +312,7 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
                     b.Dispose();
                 _stemBlocks.Clear();
 
-                await _timeStretchEngine.Submit(mixed);
+                await _timeStretchEngine.Submit(mixed, ct).ConfigureAwait(false);
 
                 var progress = TimeSpan.FromSeconds(
                 (double)_currentFramePosition / _outputDevice.SampleRate);
@@ -336,11 +341,12 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 
     private async Task StretchLoopAsync(PipelineState pipeline, CancellationToken ct)
     {
+        await Task.Yield();
         try
         {
             while (!ct.IsCancellationRequested)
             {
-                var stretched = await _timeStretchEngine.Receive();
+                var stretched = await _timeStretchEngine.Receive(ct).ConfigureAwait(false);
 
                 if (stretched.Buffer == null)
                 {
@@ -357,7 +363,10 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
                 _outputDevice.Write(stretched.Buffer.Span);
             }
         }
-        catch { }
+        catch(Exception ex) 
+        {
+            Debug.WriteLine($"StemPlaybackEngine: Error in StretchLoopAsync: {ex.Message}");
+        }
     }
 
 

@@ -34,8 +34,8 @@ public sealed class TimeStretchEngine_Tests
 
         var input = MakeBlock(5000);
 
-        await engine.Submit(input);
-        var output = await engine.Receive();
+        await engine.Submit(input, CancellationToken.None);
+        var output = await engine.Receive(CancellationToken.None);
 
         Assert.IsGreaterThan(0, output.Frames);
         Assert.AreEqual(2, output.Channels);
@@ -59,12 +59,12 @@ public sealed class TimeStretchEngine_Tests
         var input = MakeBlock(1000);
 
         for (var i = 0; i < 25; i++)
-            await engine.Submit(input);
+            await engine.Submit(input, CancellationToken.None);
 
         var normalFrames = 0;
         while (true)
         {
-            using var data = await engine.Receive();
+            using var data = await engine.Receive(CancellationToken.None);
             normalFrames += data.Frames;
             if (data.Buffer == null)
                 break;
@@ -75,12 +75,12 @@ public sealed class TimeStretchEngine_Tests
 
 
         for (var i = 0; i < 25; i++)
-            await engine.Submit(input);
+            await engine.Submit(input, CancellationToken.None);
 
         var fasterFrames = 0;
         while (true)
         {
-            using var data = await engine.Receive();
+            using var data = await engine.Receive(CancellationToken.None);
             fasterFrames += data.Frames;
             if (data.Buffer == null)
                 break;
@@ -98,12 +98,12 @@ public sealed class TimeStretchEngine_Tests
         var input = MakeBlock(1000);
 
         for (var i = 0; i < 25; i++)
-            await engine.Submit(input);
+            await engine.Submit(input, CancellationToken.None);
 
         var normalFrames = 0;
         while (true)
         {
-            using var data = await engine.Receive();
+            using var data = await engine.Receive(CancellationToken.None);
             normalFrames += data.Frames;
             if (data.Buffer == null)
                 break;
@@ -112,12 +112,12 @@ public sealed class TimeStretchEngine_Tests
         engine.Configure(new PlaybackSpeedSettings { Speed = 0.5f });
 
         for (var i = 0; i < 25; i++)
-            await engine.Submit(input);
+            await engine.Submit(input, CancellationToken.None);
 
         var slowerFrames = 0;
         while (true)
         {
-            using var data = await engine.Receive();
+            using var data = await engine.Receive(CancellationToken.None);
             slowerFrames += data.Frames;
             if (data.Buffer == null)
                 break;
@@ -135,13 +135,13 @@ public sealed class TimeStretchEngine_Tests
 
         var input = MakeBlock(100);
 
-        await engine.Submit(input);
-        var before = await engine.Receive();
+        await engine.Submit(input, CancellationToken.None);
+        var before = await engine.Receive(CancellationToken.None);
 
         engine.Configure(new PlaybackSpeedSettings { Speed = 0.75f });
 
-        await engine.Submit(input);
-        var after = await engine.Receive();
+        await engine.Submit(input, CancellationToken.None);
+        var after = await engine.Receive(CancellationToken.None);
 
         Assert.AreEqual(0, after.Frames);
     }

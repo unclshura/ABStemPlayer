@@ -110,13 +110,13 @@ public sealed class StemPlaybackEngine_Tests
             // no-op for tests
         }
 
-        public Task Submit(MixedAudioBlock input)
+        public Task Submit(MixedAudioBlock input, CancellationToken token)
         {
             _lastInput = input;
             return Task.CompletedTask;
         }
 
-        public Task<TimeStretchedAudioBlock> Receive()
+        public Task<TimeStretchedAudioBlock> Receive(CancellationToken token)
         {
             if (_lastInput.Buffer == null)
                 return Task.FromResult(default(TimeStretchedAudioBlock));

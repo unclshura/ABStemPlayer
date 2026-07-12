@@ -27,7 +27,7 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
         _channels          = channels;
 
         var bytesPerSecond = sampleRate * channels * sizeof(float);
-        _ring              = new BlockingRingBuffer(1 * bytesPerSecond);
+        _ring              = new BlockingRingBuffer(10 * bytesPerSecond);
     }
 
     public void Configure(PlaybackSpeedSettings settings)
@@ -37,25 +37,17 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
 
         _speed = settings.Speed;
 
-        if (Math.Abs(_speed - 1.0f) < 0.01f)
-        {
-            DisposeProcess();
-            _ring.ResetRing();
-        }
-        else
-        {
-            RestartProcess();
-        }
+        DisposeProcess();
+        _ring.ResetRing();
     }
 
-    public Task Submit(MixedAudioBlock input)
+    public Task Submit(MixedAudioBlock input, CancellationToken token)
     {
         // No-stretch path: enqueue block and signal semaphore
         if (Math.Abs(_speed - 1.0f) < 0.01f)
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             var b = MemoryMarshal.AsBytes(input.Buffer.Span);
-            _ring.WriteToOutput(b, b.Length, cts.Token);
+            _ring.WriteToOutput(b, b.Length, token);
 
             return Task.CompletedTask;
         }
@@ -72,21 +64,19 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
         return Task.CompletedTask;
     }
 
-    public async Task<TimeStretchedAudioBlock> Receive()
+    public async Task<TimeStretchedAudioBlock> Receive(CancellationToken token)
     {
-        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-
         int available = 0;
-        while (!cts.IsCancellationRequested)
+        while (!token.IsCancellationRequested)
         {
-            available = _ring.WaitForOutput(cts.Token);
+            available = _ring.WaitForOutput(token);
             if (available > 0)
                 break;
 
             await Task.Delay(2).ConfigureAwait(false);
         }
 
-        if (cts.IsCancellationRequested)
+        if (token.IsCancellationRequested)
             return default;
 
         var maxFloats = available / sizeof(float);
@@ -130,13 +120,6 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
         _readerRunning = true;
         _readerThread = new Thread(ReaderLoop) { IsBackground = true };
         _readerThread.Start();
-    }
-
-    private void RestartProcess()
-    {
-        DisposeProcess();
-        _ring.ResetRing();
-        StartProcess();
     }
 
     private void ReaderLoop()

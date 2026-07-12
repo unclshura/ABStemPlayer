@@ -22,7 +22,11 @@ public class BlockingRingBuffer
 
         while (written < srcLen)
         {
-            ct.ThrowIfCancellationRequested();
+            if ( ct.IsCancellationRequested )
+            {
+                Debug.WriteLine("BlockingRingBuffer: No room in the buffer to write. Timeout.");
+                return;
+            }
 
             int remaining = srcLen - written;
 
@@ -33,12 +37,11 @@ public class BlockingRingBuffer
                 ? _ringWrite - _ringRead
                 : _ring.Length - _ringRead + _ringWrite;
 
-                free = _ring.Length - used - 1; // leave 1 byte to distinguish full/empty
+                free = _ring.Length - used - 1;
             }
 
             if (free <= 0)
             {
-                // No room → block until space becomes available
                 Thread.Sleep(1);
                 continue;
             }
@@ -49,7 +52,6 @@ public class BlockingRingBuffer
             {
                 int first = Math.Min(toWrite, _ring.Length - _ringWrite);
 
-                // Write first segment
                 src.Slice(written, first)
                    .CopyTo(new Span<byte>(_ring, _ringWrite, first));
 
@@ -58,7 +60,6 @@ public class BlockingRingBuffer
                 int leftover = toWrite - first;
                 if (leftover > 0)
                 {
-                    // Wrap-around segment
                     src.Slice(written + first, leftover)
                        .CopyTo(new Span<byte>(_ring, _ringWrite, leftover));
 
@@ -72,13 +73,19 @@ public class BlockingRingBuffer
 
     public int WaitForOutput(CancellationToken token)
     {
-        while (!token.IsCancellationRequested)
+        while (true)
         {
+            if (token.IsCancellationRequested)
+            {
+                Debug.WriteLine("BlockingRingBuffer: No data in the buffer to read. Timeout.");
+                return 0;
+            }
+
             lock (_ringLock)
             {
                 var available = (_ringWrite >= _ringRead)
-                    ? _ringWrite - _ringRead
-                    : _ring.Length - _ringRead + _ringWrite;
+                ? _ringWrite - _ringRead
+                : _ring.Length - _ringRead + _ringWrite;
 
                 if (available > 0)
                     return available;
@@ -86,9 +93,6 @@ public class BlockingRingBuffer
 
             Thread.Sleep(2);
         }
-
-        Debug.WriteLine("BlockingRingBuffer: Timeout waiting for output");
-        return 0;
     }
 
     public int DrainRing(Span<byte> dest, int maxBytes)

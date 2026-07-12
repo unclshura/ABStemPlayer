@@ -101,17 +101,38 @@ public sealed class WasapiOutputDevice : IAudioOutputDevice, IDisposable
 
     }
 
+    private Lock _lock = new();
+
     private void Send(byte[] bytes)
     {
-        // Wait until buffer has enough free space
-        while (_buffer.BufferedBytes + bytes.Length > _buffer.BufferLength)
-        {
-            // Sleep a tiny amount to let WASAPI consume data
-            Thread.Sleep(2);
-        }
+        if (_out.PlaybackState != PlaybackState.Playing)
+            return;
 
-        _buffer.AddSamples(bytes, 0, bytes.Length);
+        lock (_lock)
+        {
+
+            int offset = 0;
+
+            while (offset < bytes.Length)
+            {
+                if (_out.PlaybackState != PlaybackState.Playing)
+                    return;
+
+                int free = _buffer.BufferLength - _buffer.BufferedBytes;
+                if (free <= 0)
+                {
+                    Thread.Sleep(2);
+                    continue;
+                }
+
+                int toWrite = Math.Min(free, bytes.Length - offset);
+
+                _buffer.AddSamples(bytes, offset, toWrite);
+                offset += toWrite;
+            }
+        }
     }
+
 
     public void Dispose()
     {
