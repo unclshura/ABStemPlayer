@@ -56,6 +56,8 @@ public sealed partial class PlaybackViewModel : ObservableObject
     private TimeSpan? _loopA;
     private TimeSpan? _loopB;
 
+    private static bool _commandLineProcessed = false;
+
     // -----------------------------
     // Constructor
     // -----------------------------
@@ -94,7 +96,24 @@ public sealed partial class PlaybackViewModel : ObservableObject
             UpdateLoop();
         });
 
+        if ( !_commandLineProcessed)
+        {
+            _commandLineProcessed = true;
+            ProcessCommandLineArgs();
+        }
+    }
 
+    private void ProcessCommandLineArgs()
+    {
+        var args = Environment.GetCommandLineArgs();
+        if (args.Length > 1)
+        {
+            var filePath = args[1];
+            if (File.Exists(filePath))
+            {
+                Task.Run( () => LoadFile(filePath!));
+            }
+        }
     }
 
     private async Task OnPlay()
@@ -107,11 +126,9 @@ public sealed partial class PlaybackViewModel : ObservableObject
             Stems = _engine.CurrentSession.StemSet.Stems.Select(GetMixerSettings).ToList()
         };
 
-        _engine.CurrentSession.Mixer = mixer;
-        _engine.CurrentSession.Speed = new PlaybackSpeedSettings
-        {
-            Speed = PlaybackSpeed
-        };
+        await _engine.UpdateMixerAsync(mixer);
+        await _engine.UpdatePlaybackSpeedAsync(new PlaybackSpeedSettings { Speed = PlaybackSpeed });
+
         await _engine.PlayAsync();
     }
 
@@ -133,7 +150,7 @@ public sealed partial class PlaybackViewModel : ObservableObject
 
     partial void OnPlaybackSpeedChanged(float value)
     {
-        _engine.CurrentSession?.Speed.Speed = value;
+        Task.Run( async () => await _engine.UpdatePlaybackSpeedAsync(new PlaybackSpeedSettings { Speed = PlaybackSpeed }));
     }
 
     // -----------------------------
@@ -166,6 +183,12 @@ public sealed partial class PlaybackViewModel : ObservableObject
 
         var file = files[0];
 
+        await LoadFile(file.Path.LocalPath);
+        
+    }
+
+    private async Task LoadFile(string file)
+    {
         await _engine.StopAsync();
 
         var session = await SplitStems(file);
@@ -176,28 +199,29 @@ public sealed partial class PlaybackViewModel : ObservableObject
         CurrentTime = TimeSpan.Zero;
 
         await UpdateWaveForms(session);
-        
+
         Bands.Clear();
-        foreach ( var item in session.StemSet.Stems)
+        foreach (var item in session.StemSet.Stems)
         {
-            Bands.Add(new WaveformBandViewModel(item));
+            var model = new WaveformBandViewModel(item);
+            Bands.Add(model);
         }
 
         await _engine.LoadSessionAsync(session, new PlaybackProgressReporter(this));
     }
 
-    private class PlaybackProgressReporter : IProgressReporter<TimeSpan>
+    private class PlaybackProgressReporter : IProgressReporter<double>
     {
         private readonly PlaybackViewModel _vm;
         public PlaybackProgressReporter(PlaybackViewModel vm)
         {
             _vm = vm;
         }
-        public Task ReportProgress(TimeSpan progress, CancellationToken ct)
+        public Task ReportProgress(double progress, CancellationToken ct)
         {
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
-                _vm.CurrentTime = progress;
+                _vm.CurrentTime = TimeSpan.FromMilliseconds(progress * _vm.TotalTime.TotalMilliseconds);
             });
             return Task.CompletedTask;
         }
@@ -298,7 +322,7 @@ public sealed partial class PlaybackViewModel : ObservableObject
     // Stem splitting
     // -----------------------------
 
-    private async Task<PlaybackSession?> SplitStems(IStorageFile file)
+    private async Task<PlaybackSession?> SplitStems(string file)
     {
         // Enter conversion mode
         IsConverting = true;
@@ -307,7 +331,7 @@ public sealed partial class PlaybackViewModel : ObservableObject
         _conversionCts = new CancellationTokenSource();
         var ct = _conversionCts.Token;
 
-        var outDir = Path.Combine(Path.GetDirectoryName(file.Path.LocalPath)!, "ABStemPlayer");
+        var outDir = Path.Combine(Path.GetDirectoryName(file)!, "ABStemPlayer");
 
         StemSet? stemSet = null;
 
@@ -321,7 +345,7 @@ public sealed partial class PlaybackViewModel : ObservableObject
                     return await _separator.SeparateAsync(
                         new StemSeparationRequest
                         {
-                            SourceFilePath = file.Path.LocalPath,
+                            SourceFilePath = file,
                             OutputDirectory = outDir
                         },
                         new VmProgressReporter(this),

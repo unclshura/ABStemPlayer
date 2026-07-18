@@ -36,11 +36,12 @@ public sealed class StemWaveformService : IStemWaveformService
             var count = 0;
 
             // Decode only one block per segment
-            if (decoder.TryDecodeNextBlock(out var block))
+            var block = await decoder.DecodeNextBlockAsync(CancellationToken.None);
+            if (block != null)
             {
                 try
                 {
-                    var span = block.Span;
+                    var span = block.Value.Span;
                     var channels = decoder.Stem.Channels;
 
                     for (var s = 0; s < span.Length; s++)
@@ -53,7 +54,7 @@ public sealed class StemWaveformService : IStemWaveformService
                 }
                 finally
                 {
-                    block.Dispose();
+                    block.Value.Dispose();
                 }
             }
 

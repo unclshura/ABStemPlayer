@@ -4,7 +4,7 @@ public interface IStemDecoder : IDisposable
 {
     StemTrack Stem { get; }
 
-    bool TryDecodeNextBlock(out AudioBlock block);
+    Task<AudioBlock?> DecodeNextBlockAsync(CancellationToken token);
 
     void Seek(long samplePosition);
 

@@ -35,30 +35,30 @@ public sealed class Pipeline_Integration_Tests
     }
 
     [TestMethod]
-    public void FullPipeline_Decoder_Mixer_Encoder_Works()
+    public async Task FullPipeline_Decoder_Mixer_Encoder_Works()
     {
-        var pool = new AudioBufferPool();
+        var pool          = new AudioBufferPool();
         var readerFactory = new FfmpegAudioReaderFactory();
         var decoderFactory = new StemDecoderFactory(readerFactory, pool);
-        var mixer = new AudioMixer(pool);
+        var mixer         = new AudioMixer(pool);
 
         var stems = new[]
-    {
-        new StemTrack { FilePath = _inputPath, Name = "stem1" },
-        new StemTrack { FilePath = _inputPath, Name = "stem2" }
-    };
+        {
+            new StemTrack { FilePath = _inputPath, Name = "stem1" },
+            new StemTrack { FilePath = _inputPath, Name = "stem2" }
+        };
 
         var decoders = stems
-        .Select(s => decoderFactory.Create(s))
-        .ToList();
+            .Select(s => decoderFactory.Create(s))
+            .ToList();
 
         var settings = new MixerSettings
         {
             Stems = new[]
-        {
-            new StemMixSettings { Enabled = true, GainDb = 0, Pan = 0 },
-            new StemMixSettings { Enabled = true, GainDb = -3, Pan = 0.2f }
-        }
+            {
+                new StemMixSettings { Enabled = true, GainDb = 0, Pan = 0 },
+                new StemMixSettings { Enabled = true, GainDb = -3, Pan = 0.2f }
+            }
         };
 
         var outFlac = Path.Combine(_outputDir, "mixed.flac");
@@ -67,9 +67,9 @@ public sealed class Pipeline_Integration_Tests
         {
             FileName = "ffmpeg",
             Arguments =
-            "-y -f f32le -ar 44100 -ac 2 -i pipe:0 " +
-            "-compression_level 12 " +
-            $"\"{outFlac}\"",
+                "-y -f f32le -ar 44100 -ac 2 -i pipe:0 " +
+                "-compression_level 12 " +
+                $"\"{outFlac}\"",
             RedirectStandardInput = true,
             RedirectStandardError = true,
             UseShellExecute       = false,
@@ -79,7 +79,7 @@ public sealed class Pipeline_Integration_Tests
 
         using var ff = Process.Start(psi);
         var stdin = ff!.StandardInput.BaseStream;
-        // Start draining stderr immediately
+
         _ = Task.Run(() => DrainStderr(ff));
 
         var running = true;
@@ -90,7 +90,8 @@ public sealed class Pipeline_Integration_Tests
 
             foreach (var d in decoders)
             {
-                if (!d.TryDecodeNextBlock(out var block))
+                var block = await d.DecodeNextBlockAsync(CancellationToken.None);
+                if (block is null)
                 {
                     foreach (var b in blocks)
                         b.Dispose();
@@ -99,7 +100,7 @@ public sealed class Pipeline_Integration_Tests
                     break;
                 }
 
-                blocks.Add(block);
+                blocks.Add(block.Value);
             }
 
             if (!running)
@@ -107,9 +108,12 @@ public sealed class Pipeline_Integration_Tests
 
             var mixed = mixer.Mix(blocks, settings);
 
-            var span = mixed.Buffer.Span;
-            var bytes = MemoryMarshal.AsBytes(span);
-            stdin.Write(bytes);
+            // Convert float → bytes
+            ReadOnlySpan<float> span = mixed.Buffer.Span;
+            ReadOnlyMemory<byte> bytes = MemoryMarshal.AsBytes(span).ToArray();
+
+            await stdin.WriteAsync(bytes, CancellationToken.None);
+            await stdin.FlushAsync(CancellationToken.None);
 
             mixed.Dispose();
             foreach (var b in blocks)
@@ -126,7 +130,7 @@ public sealed class Pipeline_Integration_Tests
 
         using var verify = new FfmpegAudioReader(outFlac);
         var buf = new float[4096];
-        var read = verify.Read(buf, 0, buf.Length);
+        var read = await verify.ReadAsync(buf.AsMemory(), CancellationToken.None);
 
         Assert.IsGreaterThan(0, read, "FLAC output is not decodable");
     }
@@ -136,9 +140,6 @@ public sealed class Pipeline_Integration_Tests
         try
         {
             var reader = proc.StandardError;
-
-            // ffmpeg writes short lines, so ReadLine is fine
-            // If you want zero allocations, use ReadAsync into a rented buffer.
             string? line;
             while ((line = reader.ReadLine()) != null)
             {

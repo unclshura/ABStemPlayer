@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "ABStemPlayer": {
+      "commandName": "Project",
+      "commandLineArgs": "C:\\Users\\uncls\\Music\\test_input.mp3"
+    }
+  }
+}

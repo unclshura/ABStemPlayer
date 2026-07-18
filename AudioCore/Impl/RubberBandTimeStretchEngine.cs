@@ -1,10 +1,9 @@
-﻿using System.Collections.Concurrent;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace AudioCore.Impl;
 
-public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposable
+public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IAsyncDisposable
 {
     private readonly AudioBufferPool _pool;
     private readonly int             _sampleRate;
@@ -17,8 +16,9 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
     private BlockingRingBuffer       _ring;
     private float                    _speed = 1.0f;
 
-    private Thread?                  _readerThread;
-    private bool                     _readerRunning;
+    private Task?                    _readerTask;
+    private CancellationTokenSource? _cts;
+    private CancellationToken        _token;
 
     public RubberBandTimeStretchEngine(AudioBufferPool pool, int sampleRate = 44100, int channels = 2)
     {
@@ -27,19 +27,21 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
         _channels          = channels;
 
         var bytesPerSecond = sampleRate * channels * sizeof(float);
-        _ring              = new BlockingRingBuffer(10 * bytesPerSecond);
+        _ring              = new BlockingRingBuffer( bytesPerSecond * 2);
     }
 
-    public void Configure(PlaybackSpeedSettings settings)
+    public async Task Configure(PlaybackSpeedSettings settings, CancellationToken token)
     {
-        if (Math.Abs(settings.Speed - _speed) < 0.0001f)
-            return;
-
         _speed = settings.Speed;
+        
+        if ( _cts != null && _ff != null )
+            await DisposeProcess().ConfigureAwait(false);
 
-        DisposeProcess();
-        _ring.ResetRing();
+        _ring.Reset();
+        _token = token;
     }
+
+    public Task IsReadyToAccept(CancellationToken token) => _ring.WaitForRoomToWrite(token);
 
     public Task Submit(MixedAudioBlock input, CancellationToken token)
     {
@@ -47,7 +49,7 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
         if (Math.Abs(_speed - 1.0f) < 0.01f)
         {
             var b = MemoryMarshal.AsBytes(input.Buffer.Span);
-            _ring.WriteToOutput(b, b.Length, token);
+            _ring.Write(b, b.Length, token);
 
             return Task.CompletedTask;
         }
@@ -69,7 +71,7 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
         int available = 0;
         while (!token.IsCancellationRequested)
         {
-            available = _ring.WaitForOutput(token);
+            available = await _ring.WaitForDataToRead(token).ConfigureAwait(false);
             if (available > 0)
                 break;
 
@@ -83,7 +85,7 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
         var outBuf    = _pool.Rent(maxFloats);
         var outBytes  = MemoryMarshal.AsBytes(outBuf.Span);
 
-        var readBytes = _ring.DrainRing(outBytes, outBytes.Length);
+        var readBytes = _ring.Read(outBytes, outBytes.Length);
         if (readBytes <= 0)
         {
             outBuf.Dispose();
@@ -117,52 +119,57 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IDisposabl
         _stdin = _ff.Stdin!;
         _stdout = _ff.Stdout!;
 
-        _readerRunning = true;
-        _readerThread = new Thread(ReaderLoop) { IsBackground = true };
-        _readerThread.Start();
+        Debug.Assert(_cts == null);
+
+        _cts           = CancellationTokenSource.CreateLinkedTokenSource(_token);
+        _readerTask    = Task.Run(ReaderLoop);
     }
 
-    private void ReaderLoop()
+    private async Task ReaderLoop()
     {
+        Debug.Assert(_cts != null);
+
         var buf = new byte[4096];
 
         try
         {
-            while (_readerRunning)
+            while (!_cts.Token.IsCancellationRequested)
             {
-                var read = _stdout!.Read(buf, 0, buf.Length);
+                var read = await _stdout!.ReadAsync(buf, 0, buf.Length, _cts.Token).ConfigureAwait(false);
                 if (read <= 0)
                     break;
 
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                _ring.WriteToOutput(buf, read, cts.Token);
+                _ring.Write(buf, read, _cts.Token);
             }
         }
         catch { }
     }
 
 
-    private void DisposeProcess()
+    private async Task DisposeProcess()
     {
-        _readerRunning = false;
+        try { _stdout?.Close();   } catch { }
+        try { _stdin ?.Close();   } catch { }
+        try { _ff    ?.Dispose(); } catch { }
 
-        try { _stdout?.Close(); } catch { }
-        try { _stdin?.Close(); } catch { }
-        try { _ff?.Dispose(); } catch { }
-
-        if (_readerThread != null)
+        if (_readerTask != null)
         {
-            try { _readerThread.Join(500); } catch { }
-            _readerThread = null;
+            Debug.Assert(_cts != null);
+
+            _cts.Cancel();
+            try { await _readerTask.ConfigureAwait(false); } catch { }
+            _readerTask = null;
+            _cts.Dispose();
+            _cts = null;
         }
 
-        _ff = null;
-        _stdin = null;
+        _ff     = null;
+        _stdin  = null;
         _stdout = null;
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
-        DisposeProcess();
+        await DisposeProcess().ConfigureAwait(false);
     }
 }

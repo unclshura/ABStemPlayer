@@ -46,6 +46,7 @@ public sealed class WasapiOutputDevice_Tests
     public void Write_Adds_Bytes_To_Buffer()
     {
         var fake = new FakeWasapiOut();
+        fake.Play();
         var dev = new WasapiOutputDevice(new ByteBufferPool(), fake);
 
         float[] samples = { 1f, -1f, 0.5f, -0.5f };

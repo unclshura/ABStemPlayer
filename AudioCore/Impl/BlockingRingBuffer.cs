@@ -11,12 +11,12 @@ public class BlockingRingBuffer
 
     public BlockingRingBuffer(int size)
     {
-        _ring = new byte[size];
+        _ring      = new byte[size];
         _ringWrite = 0;
-        _ringRead = 0;
+        _ringRead  = 0;
     }
 
-    public void WriteToOutput(ReadOnlySpan<byte> src, int srcLen, CancellationToken ct)
+    public void Write(ReadOnlySpan<byte> src, int srcLen, CancellationToken ct)
     {
         int written = 0;
 
@@ -24,7 +24,7 @@ public class BlockingRingBuffer
         {
             if ( ct.IsCancellationRequested )
             {
-                Debug.WriteLine("BlockingRingBuffer: No room in the buffer to write. Timeout.");
+                Debug.WriteLine("BlockingRingBuffer: Write: operation cancelled.");
                 return;
             }
 
@@ -71,31 +71,56 @@ public class BlockingRingBuffer
         }
     }
 
-    public int WaitForOutput(CancellationToken token)
+    public async Task<int> WaitForRoomToWrite(CancellationToken token)
     {
         while (true)
         {
             if (token.IsCancellationRequested)
             {
-                Debug.WriteLine("BlockingRingBuffer: No data in the buffer to read. Timeout.");
+                Debug.WriteLine("BlockingRingBuffer: WaitForRoomToWrite: operation cancelled.");
                 return 0;
             }
 
             lock (_ringLock)
             {
-                var available = (_ringWrite >= _ringRead)
-                ? _ringWrite - _ringRead
-                : _ring.Length - _ringRead + _ringWrite;
+                var used = (_ringWrite >= _ringRead)
+                    ? _ringWrite - _ringRead
+                    : _ring.Length - _ringRead + _ringWrite;
 
-                if (available > 0)
-                    return available;
+                var free = _ring.Length - used - 1;
+
+                if (free > 0)
+                    return free;
             }
 
-            Thread.Sleep(2);
+            await Task.Delay(2).ConfigureAwait(false);
+        }
+    }
+    public async Task<int> WaitForDataToRead(CancellationToken token)
+    {
+        while (true)
+        {
+            if (token.IsCancellationRequested)
+            {
+                Debug.WriteLine("BlockingRingBuffer: WaitForDataToRead: operation cancelled.");
+                return 0;
+            }
+
+            lock (_ringLock)
+            {
+                var used = (_ringWrite >= _ringRead)
+                    ? _ringWrite - _ringRead
+                    : _ring.Length - _ringRead + _ringWrite;
+
+                if (used > 0)
+                    return used;
+            }
+
+            await Task.Delay(2).ConfigureAwait(false);
         }
     }
 
-    public int DrainRing(Span<byte> dest, int maxBytes)
+    public int Read(Span<byte> dest, int maxBytes)
     {
         lock (_ringLock)
         {
@@ -124,7 +149,7 @@ public class BlockingRingBuffer
         }
     }
 
-    public void ResetRing()
+    public void Reset()
     {
         lock (_ringLock)
         {

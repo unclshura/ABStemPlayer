@@ -1,25 +1,28 @@
-﻿using System.Diagnostics;
-using System.Text.Json;
+﻿using System.Buffers;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace AudioCore.Impl;
 
 public sealed class FfmpegProcess : IDisposable
 {
-    public Process? Proc  { get; private set; }
+    public Process? Proc { get; private set; }
     public Stream? Stdout { get; private set; }
-    public Stream? Stdin  { get; private set; }
+    public Stream? Stdin { get; private set; }
 
-    private string _name;
-    private string _commandLine;
-    private bool   _redirectOutput;
-    private bool   _redirectInput;
+    private readonly string _name;
+    private readonly string _commandLine;
+    private readonly bool   _redirectOutput;
+    private readonly bool   _redirectInput;
+
+    private Task? _stderrTask;
 
     public FfmpegProcess(string name, string commandLine, bool redirectOutput = true, bool redirectInput = true)
     {
-        _name           = name;
-        _commandLine    = commandLine;
+        _name = name;
+        _commandLine = commandLine;
         _redirectOutput = redirectOutput;
-        _redirectInput  = redirectInput;
+        _redirectInput = redirectInput;
     }
 
     public void StartProcess()
@@ -41,60 +44,88 @@ public sealed class FfmpegProcess : IDisposable
 
         Proc = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start ffmpeg process");
 
-        if ( _redirectInput)
+        if (_redirectInput)
             Stdin = Proc.StandardInput.BaseStream;
         if (_redirectOutput)
             Stdout = Proc.StandardOutput.BaseStream;
 
-        // Start draining stderr immediately
-        _ = Task.Run(() => DrainStderr(Proc));
+        _stderrTask = Task.Run(() => DrainStderrAsync(Proc));
     }
 
-    private void DrainStderr(Process proc)
+    private async Task DrainStderrAsync(Process proc)
     {
         try
         {
-            var reader = proc.StandardError;
-
-            // ffmpeg writes short lines, so ReadLine is fine
-            // If you want zero allocations, use ReadAsync into a rented buffer.
-            string? line;
-            while ((line = reader.ReadLine()) != null)
+            using var reader = proc.StandardError;
+            while (true)
             {
+                var line = await reader.ReadLineAsync().ConfigureAwait(false);
+                if (line == null)
+                    break;
+
                 Debug.WriteLine($"{_name}: {line}");
             }
         }
         catch
         {
-            // ignore exceptions during stderr drain, as the process may have exited
         }
     }
 
-    public int Read(float[] buffer, int offset, int count)
+    public async Task<int> ReadAsync(Memory<float> buffer, CancellationToken token)
     {
-        var bytesNeeded = count * sizeof(float);
-        var tmp = new byte[bytesNeeded];
-
-        var readBytes = Stdout!.Read(tmp, 0, bytesNeeded);
-        if (readBytes <= 0)
+        if (Stdout is null)
             return 0;
 
-        Buffer.BlockCopy(tmp, 0, buffer, offset * sizeof(float), readBytes);
+        int maxBytes = buffer.Length * sizeof(float);
+        byte[] tmp = ArrayPool<byte>.Shared.Rent(maxBytes);
 
-        return readBytes / sizeof(float);
+        try
+        {
+            int readBytes = await Stdout.ReadAsync(tmp.AsMemory(0, maxBytes), token)
+                                        .ConfigureAwait(false);
+            if (readBytes <= 0)
+                return 0;
+
+            int floatsRead = readBytes / sizeof(float);
+            var floatMem   = buffer.Slice(0, floatsRead);
+
+            // Copy raw bytes into the caller's float buffer
+            var floatSpan = floatMem.Span;
+            var byteSpan  = MemoryMarshal.AsBytes(floatSpan);
+            tmp.AsSpan(0, readBytes).CopyTo(byteSpan);
+
+            return floatsRead;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(tmp);
+        }
     }
 
+    public async Task WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token)
+    {
+        if (Stdin is null)
+            throw new InvalidOperationException("StdIn is not redirected");
+        await Stdin.WriteAsync(bytes, token).ConfigureAwait(false);
+    }
+
+    public Task FlushAsync(CancellationToken token)
+    {
+        if (Stdin is null)
+            throw new InvalidOperationException("StdIn is not redirected");
+        return Stdin.FlushAsync(token);
+    }
 
     private void DisposeProcessOnly()
     {
         if (Proc != null)
             Debug.WriteLine($"{_name}: Disposing ffmpeg process");
 
-        try { Stdout?.Dispose(); Stdout = null;                 } catch { }
-        try { Stdin?.Dispose(); Stdin = null;                   } catch { }
-        try { Proc?.StandardError.BaseStream?.Dispose();        } catch { }
+        try { Stdout?.Dispose(); Stdout = null; } catch { }
+        try { Stdin?.Dispose(); Stdin = null; } catch { }
+        try { Proc?.StandardError.BaseStream?.Dispose(); } catch { }
         try { if (Proc != null && !Proc.HasExited) Proc.Kill(); } catch { }
-        try { Proc?.Dispose(); Proc = null;                     } catch { }
+        try { Proc?.Dispose(); Proc = null; } catch { }
     }
 
     public void Dispose()

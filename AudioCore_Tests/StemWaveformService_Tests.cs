@@ -48,16 +48,16 @@ public sealed class StemWaveformService_Tests
             }
         }
 
-        public bool TryDecodeNextBlock(out AudioBlock block)
+        public Task<AudioBlock?> DecodeNextBlockAsync(CancellationToken ct)
         {
-            if (_blocks.Count == 0)
-            {
-                block = default;
-                return false;
-            }
+            if (ct.IsCancellationRequested)
+                return Task.FromCanceled<AudioBlock?>(ct);
 
-            block = _blocks.Dequeue();
-            return true;
+            if (_blocks.Count == 0)
+                return Task.FromResult<AudioBlock?>(null);
+
+            var block = _blocks.Dequeue();
+            return Task.FromResult<AudioBlock?>(block);
         }
 
         public void Seek(long samplePosition)
@@ -74,6 +74,7 @@ public sealed class StemWaveformService_Tests
         {
         }
     }
+
 
     private string GetTestInputPath()
     {

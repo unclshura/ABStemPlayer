@@ -1,6 +1,7 @@
-﻿using AudioCore.Interfaces;
+﻿using AudioCore.Impl;
+using AudioCore.Interfaces;
 using AudioCore.Models;
-using AudioCore.Impl;
+using NAudio.Wave;
 
 namespace AudioCore_Tests;
 
@@ -38,16 +39,16 @@ public sealed class StemPlaybackEngine_Tests
             }
         }
 
-        public bool TryDecodeNextBlock(out AudioBlock block)
+        public Task<AudioBlock?> DecodeNextBlockAsync(CancellationToken token)
         {
+            AudioBlock? block;
             if (_blocks.Count == 0)
             {
-                block = default;
-                return false;
+                return Task.FromResult<AudioBlock?>(null);
             }
 
             block = _blocks.Dequeue();
-            return true;
+            return Task.FromResult<AudioBlock?>(block);
         }
 
         public void Seek(long samplePosition)
@@ -105,9 +106,10 @@ public sealed class StemPlaybackEngine_Tests
     {
         private MixedAudioBlock _lastInput;
 
-        public void Configure(PlaybackSpeedSettings settings)
+        public Task Configure(PlaybackSpeedSettings settings, CancellationToken token)
         {
             // no-op for tests
+            return Task.CompletedTask;
         }
 
         public Task Submit(MixedAudioBlock input, CancellationToken token)
@@ -130,6 +132,8 @@ public sealed class StemPlaybackEngine_Tests
             _lastInput = default;
             return Task.FromResult(block);
         }
+
+        Task ITimeStretchEngine.IsReadyToAccept(CancellationToken token) => Task.CompletedTask;
     }
 
     private sealed class MockOutput : IAudioOutputDevice
@@ -141,6 +145,8 @@ public sealed class StemPlaybackEngine_Tests
         public int LastWriteSamples { get; private set; }
         public bool Started { get; private set; }
 
+        public Task IsReadyToAccept(CancellationToken token) => Task.CompletedTask;
+
         public void Start()
         {
             Started = true;
@@ -150,6 +156,8 @@ public sealed class StemPlaybackEngine_Tests
         {
             Started = false;
         }
+        public void Pause() => Started = false;
+        public PlaybackState State => Started ? PlaybackState.Playing : PlaybackState.Stopped;
 
         public void Write(ReadOnlySpan<float> samples)
         {
@@ -203,9 +211,9 @@ public sealed class StemPlaybackEngine_Tests
         };
     }
 
-    private class DummyProgressReporter : IProgressReporter<TimeSpan>
+    private class DummyProgressReporter : IProgressReporter<double>
     {
-        public Task ReportProgress(TimeSpan value, CancellationToken ct)
+        public Task ReportProgress(double value, CancellationToken ct)
             => Task.CompletedTask;
     }
 
@@ -248,11 +256,11 @@ public sealed class StemPlaybackEngine_Tests
     [TestMethod]
     public async Task PauseAsync_StopsOutputDevice()
     {
-        var pool          = new AudioBufferPool();
+        var pool           = new AudioBufferPool();
         var decoderFactory = new MockDecoderFactory(pool, 1024, 5);
-        var output        = new MockOutput();
-        var mixer         = new MockMixer(pool);
-        var stretch       = new MockTimeStretch();
+        var output         = new MockOutput();
+        var mixer          = new MockMixer(pool);
+        var stretch        = new MockTimeStretch();
 
         var engine = new StemPlaybackEngine(decoderFactory, output, mixer, stretch);
 
@@ -268,11 +276,11 @@ public sealed class StemPlaybackEngine_Tests
     [TestMethod]
     public async Task RenderLoop_WritesAudioBlocks()
     {
-        var pool          = new AudioBufferPool();
+        var pool           = new AudioBufferPool();
         var decoderFactory = new MockDecoderFactory(pool, 1024, 3);
-        var output        = new MockOutput();
-        var mixer         = new MockMixer(pool);
-        var stretch       = new MockTimeStretch();
+        var output         = new MockOutput();
+        var mixer          = new MockMixer(pool);
+        var stretch        = new MockTimeStretch();
 
         var engine = new StemPlaybackEngine(decoderFactory, output, mixer, stretch);
 
@@ -292,11 +300,11 @@ public sealed class StemPlaybackEngine_Tests
     [TestMethod]
     public async Task SeekAsync_MovesDecoders()
     {
-        var pool          = new AudioBufferPool();
+        var pool           = new AudioBufferPool();
         var decoderFactory = new MockDecoderFactory(pool, 1024, 5);
-        var output        = new MockOutput();
-        var mixer         = new MockMixer(pool);
-        var stretch       = new MockTimeStretch();
+        var output         = new MockOutput();
+        var mixer          = new MockMixer(pool);
+        var stretch        = new MockTimeStretch();
 
         var engine = new StemPlaybackEngine(decoderFactory, output, mixer, stretch);
 
@@ -330,7 +338,7 @@ public sealed class StemPlaybackEngine_Tests
         await engine.LoadSessionAsync(session, new DummyProgressReporter());
         await engine.PlayAsync();
 
-        await Task.Delay(50);
+        await Task.Delay(TimeSpan.FromSeconds(3));
 
         await engine.StopAsync();
 

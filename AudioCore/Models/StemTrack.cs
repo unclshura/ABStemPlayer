@@ -9,4 +9,6 @@ public sealed class StemTrack
     public int SampleRate    { get; set; }
     public int Channels      { get; set; }
     public float[] Waveform  { get; set; } = [];
+
+    public long TotalFrames => (long)(Duration.TotalMilliseconds * SampleRate / 1000.0);
 }

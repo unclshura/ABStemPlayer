@@ -8,9 +8,10 @@ public sealed class PlaybackSpeedSettings
 
 public interface ITimeStretchEngine
 {
-    void Configure(PlaybackSpeedSettings settings);
+    Task Configure(PlaybackSpeedSettings settings, CancellationToken token);
 
     // Streaming block processing
+    Task IsReadyToAccept(CancellationToken token);
     Task Submit(MixedAudioBlock input, CancellationToken token);
     Task<TimeStretchedAudioBlock> Receive(CancellationToken token);
 }

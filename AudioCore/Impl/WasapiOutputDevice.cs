@@ -69,8 +69,10 @@ public sealed class WasapiOutputDevice : IAudioOutputDevice, IDisposable
         _out.Init(_buffer);
     }
 
-    public void Start() => _out.Play();
-    public void Stop() => _out.Stop();
+    public void Start()        => _out.Play();
+    public void Stop()         => _out.Stop();
+    public void Pause()        => _out.Pause();
+    public PlaybackState State => _out.PlaybackState;
 
     public void Write(ReadOnlySpan<float> samples)
     {
@@ -102,6 +104,18 @@ public sealed class WasapiOutputDevice : IAudioOutputDevice, IDisposable
     }
 
     private Lock _lock = new();
+
+    public async Task IsReadyToAccept(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            int free = _buffer.BufferLength - _buffer.BufferedBytes;
+            if (free > 0)
+                return;
+
+            await Task.Delay(2, token).ConfigureAwait(false);
+        }
+    }
 
     private void Send(byte[] bytes)
     {

@@ -1,4 +1,4 @@
-﻿namespace AudioCore.Impl;
+﻿using AudioCore.Impl;
 
 public sealed class StemDecoder : IStemDecoder
 {
@@ -15,38 +15,39 @@ public sealed class StemDecoder : IStemDecoder
         StemTrack stem,
         int blockSize = 4096)
     {
-        _reader    = reader;
-        _pool      = pool;
+        _reader = reader;
+        _pool = pool;
         _blockSize = blockSize;
-        Stem       = stem;
+        Stem = stem;
 
-        Stem.Channels   = reader.Channels;
+        Stem.Channels = reader.Channels;
         Stem.SampleRate = reader.SampleRate;
-        Stem.Duration   = TimeSpan.FromSeconds((double)reader.TotalSamples / reader.SampleRate);
+        Stem.Duration = TimeSpan.FromSeconds((double)reader.TotalSamples / reader.SampleRate);
     }
 
-    public bool TryDecodeNextBlock(out AudioBlock block)
+    public async Task<AudioBlock?> DecodeNextBlockAsync(CancellationToken token)
     {
-        var channels = _reader.Channels;
-        var floatsNeeded = _blockSize * channels;
+        int channels     = _reader.Channels;
+        int floatsNeeded = _blockSize * channels;
 
         var buf = _pool.Rent(floatsNeeded);
-        var readFloats = _reader.Read(buf.Samples, 0, floatsNeeded);
+
+        // Async read into Memory<float>
+        int readFloats = await _reader.ReadAsync(buf.Samples.AsMemory(0, floatsNeeded), token)
+                                      .ConfigureAwait(false);
 
         if (readFloats <= 0)
         {
             buf.Dispose();
-            block = default;
-            return false;
+            return null;
         }
 
         buf.Length = readFloats;
 
-        var pos = _currentSample;
+        long pos = _currentSample;
         _currentSample += readFloats / channels;
 
-        block = new AudioBlock(buf, _reader.SampleRate, channels, pos);
-        return true;
+        return new AudioBlock(buf, _reader.SampleRate, channels, pos);
     }
 
     public void Seek(long samplePosition)

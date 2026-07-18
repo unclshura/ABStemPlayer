@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Globalization;
 
 namespace AudioCore.Impl;
 
@@ -6,11 +7,12 @@ public sealed class FfmpegAudioReader : IAudioReader, IDisposable
 {
     private readonly string _path;
 
-    // Lazy process wrapper
     private Lazy<FfmpegProcess> _process;
 
-    // Remember last seek position
     private long _pendingSeekSample = 0;
+
+    // NEW: internal position tracking (in floats)
+    private long _pos = 0;
 
     public int SampleRate { get; }
     public int Channels { get; }
@@ -31,41 +33,55 @@ public sealed class FfmpegAudioReader : IAudioReader, IDisposable
         _process = CreateLazyProcess();
     }
 
-    private Lazy<FfmpegProcess> CreateLazyProcess() => new Lazy<FfmpegProcess>(() =>
+    private Lazy<FfmpegProcess> CreateLazyProcess() =>
+        new Lazy<FfmpegProcess>(() =>
         {
             var startSeconds = (double)_pendingSeekSample / SampleRate;
 
             var cmd =
                 "-hide_banner -loglevel error " +
                 "-nostdin " +
-                $"-ss {startSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)} " +
-                $"-i \"{_path}\" " +
+                $"-i \"{_path}\" " +                     // input first
+                $"-ss {startSeconds.ToString(CultureInfo.InvariantCulture)} " + // output seek
                 $"-f f32le -ac {Channels} -ar {SampleRate} pipe:1";
+
 
             var p = new FfmpegProcess(
                 name: $"pipe:{_path}",
                 commandLine: cmd,
                 redirectOutput: true,
-                redirectInput: true);
+                redirectInput: false);
 
             p.StartProcess();
             return p;
         });
 
-    public int Read(float[] buffer, int offset, int count)
+    /// <summary>
+    /// Async float reader using new FfmpegProcess.ReadAsync
+    /// </summary>
+    public async Task<int> ReadAsync(Memory<float> buffer, CancellationToken token)
     {
-        var proc = _process.Value; // starts process if not started
+        var proc = _process.Value;
         if (proc.Stdout is null)
             return 0;
 
-        return proc.Read(buffer, offset, count);
+        int readFloats = await proc.ReadAsync(buffer, token).ConfigureAwait(false);
+
+        // NEW: update internal position
+        _pos += readFloats;
+
+        return readFloats;
     }
 
     public void Seek(long sampleIndex)
     {
         _pendingSeekSample = sampleIndex;
+
+        // NEW: update internal position (floats)
+        _pos = sampleIndex * Channels;
+
         DisposeProcessOnly();
-        _process = CreateLazyProcess(); // new lazy instance
+        _process = CreateLazyProcess();
     }
 
     public void Reset()

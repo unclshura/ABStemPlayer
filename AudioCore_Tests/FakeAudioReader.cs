@@ -1,4 +1,5 @@
-﻿using AudioCore.Interfaces;
+﻿using System.Buffers;
+using AudioCore.Interfaces;
 
 namespace AudioCore_Tests;
 
@@ -20,19 +21,29 @@ public sealed class FakeAudioReader : IAudioReader
         _pos = 0;
     }
 
-    public int Read(float[] buffer, int offset, int count)
+    public Task<int> ReadAsync(Memory<float> buffer, CancellationToken token)
     {
         if (_disposed)
             throw new ObjectDisposedException(nameof(FakeAudioReader));
 
-        var remaining = _data.Length - _pos;
-        if (remaining <= 0)
-            return 0;
+        if (token.IsCancellationRequested)
+            return Task.FromCanceled<int>(token);
 
-        var toRead = (int)Math.Min(count, remaining);
-        Array.Copy(_data, _pos, buffer, offset, toRead);
-        _pos += toRead;
-        return toRead;
+        // How many floats remain?
+        long remaining = _data.Length - _pos;
+        if (remaining <= 0)
+            return Task.FromResult(0);
+
+        // How many floats can we copy?
+        int toCopy = (int)Math.Min(buffer.Length, remaining);
+
+        // Copy from backing array into caller's buffer
+        _data.AsMemory((int)_pos, toCopy).CopyTo(buffer);
+
+        // Advance position
+        _pos += toCopy;
+
+        return Task.FromResult(toCopy);
     }
 
     public void Seek(long samplePosition)
