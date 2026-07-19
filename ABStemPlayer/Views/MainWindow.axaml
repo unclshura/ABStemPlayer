@@ -39,9 +39,7 @@
               Grid.Column="0"
               Margin="8">
 
-            <ScrollViewer Grid.Row="1"
-                          Grid.Column="0"
-                          Margin="8"
+            <ScrollViewer Margin="8"
                           VerticalScrollBarVisibility="Auto">
 
                 <ItemsControl ItemsSource="{Binding Bands}"

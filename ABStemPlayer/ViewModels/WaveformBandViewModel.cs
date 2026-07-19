@@ -19,6 +19,8 @@ public partial class WaveformBandViewModel : ObservableObject
     private readonly StemTrack _stem;
     public string BandName => _stem.Name;
 
+    public override string ToString() => $"{Duration} {BandName} X:{PlaybackX}";
+
     [ObservableProperty] private double _canvasWidth;
     [ObservableProperty] private double _canvasHeight;
     [ObservableProperty] private Geometry? _waveformGeometry;

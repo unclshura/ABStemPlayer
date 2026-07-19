@@ -27,7 +27,7 @@ public sealed class FfmpegProcess : IDisposable
 
     public void StartProcess()
     {
-        Debug.WriteLine($"{_name}: Starting ffmpeg process");
+        Debug.WriteLine($"{_name}: Starting ffmpeg process: {_commandLine.Replace("\r", "").Replace("\n", " ").Replace("\t", " ")}");
 
         var psi = new ProcessStartInfo
         {

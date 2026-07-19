@@ -26,11 +26,12 @@ public sealed class Htdemucs6sSeparator : IStemSeparator
         if (existingStems != null)
             return existingStems;
 
-        var mix = LoadStereoFloatWave(request.SourceFilePath, out var sr);
-        //if (sr != _sampleRate)
-        //    throw new InvalidOperationException($"Input must be {_sampleRate} Hz");
+        var probe = FfprobeProcess.ProbeAudio(request.SourceFilePath);
 
-        var totalSamples = mix.GetLength(1);
+        int totalSamples = (int)(probe.Duration.TotalSeconds * _sampleRate);
+
+        // Decode whole file to stereo float array via ffmpeg, resampled to 44.1kHz.
+        var mix = LoadStereoFloatWave(request.SourceFilePath, totalSamples);
 
         var opts = new SessionOptions();
         opts.AppendExecutionProvider_CPU();
@@ -134,12 +135,12 @@ public sealed class Htdemucs6sSeparator : IStemSeparator
 
             result.Add(new StemTrack
             {
-                Type = Enum.Parse<StemType>(_stemNames[i]),
-                Name = name,
-                FilePath = path,
+                Type       = Enum.Parse<StemType>(_stemNames[i]),
+                Name       = name,
+                FilePath   = path,
                 SampleRate = _sampleRate,
-                Channels = _channels,
-                Duration = TimeSpan.FromSeconds((double)totalSamples / _sampleRate)
+                Channels   = _channels,
+                Duration   = TimeSpan.FromSeconds((double)totalSamples / _sampleRate)
             });
         }
 
@@ -150,36 +151,49 @@ public sealed class Htdemucs6sSeparator : IStemSeparator
         };
     }
 
-    private StemSet? CheckExistingStems(StemSeparationRequest request)
+    private static float[,] LoadStereoFloatWave(string path, int totalSamples)
     {
-        var filesToCheck = Enum.GetNames(typeof(StemType))
-            .Select(stemType => (stemType, Path.Combine(request.OutputDirectory,
-                $"{Path.GetFileNameWithoutExtension(request.SourceFilePath)}_{stemType}.flac")))
-            .ToList();
+        var result = new float[_channels, totalSamples];
 
-        var stems = new List<StemTrack>();
-        var set = new StemSet
+        var cmd =
+            "-hide_banner -loglevel error " +
+            $"-i \"{path}\" " +
+            "-map a:0 " +
+            "-af aresample " +
+            "-f f32le -ac 2 -ar 44100 pipe:1";
+
+        using var ff = new FfmpegProcess(
+            name: $"decode:{Path.GetFileName(path)}",
+            commandLine: cmd,
+            redirectOutput: true,
+            redirectInput: false);
+
+        ff.StartProcess();
+
+        var buffer = new float[4096 * _channels];
+        var pos    = 0;
+
+        const float SCALE = 2f;
+
+        while (true)
         {
-            OriginalFilePath = request.SourceFilePath,
-            Stems = stems
-        };
+            var readFloats = ff.ReadAsync(buffer.AsMemory(), CancellationToken.None).GetAwaiter().GetResult();
+            if (readFloats <= 0)
+                break;
 
-        foreach (var f in filesToCheck.Where(f => File.Exists(f.Item2)))
-        {
-            using var reader = new AudioFileReader(f.Item2);
-
-            stems.Add(new StemTrack
+            var framesRead = readFloats / _channels;
+            for (var f = 0; f < framesRead && pos < totalSamples; f++, pos++)
             {
-                Type = Enum.Parse<StemType>(f.Item1),
-                Name = Path.GetFileName(f.Item2),
-                FilePath = f.Item2,
-                SampleRate = reader.WaveFormat.SampleRate,
-                Channels = reader.WaveFormat.Channels,
-                Duration = reader.TotalTime
-            });
+                var baseIndex = f * _channels;
+                result[0, pos] = buffer[baseIndex + 0] * SCALE;
+                result[1, pos] = buffer[baseIndex + 1] * SCALE;
+            }
+
+            if (pos >= totalSamples)
+                break;
         }
 
-        return stems.Count > 0 ? set : null;
+        return result;
     }
 
     private static float[] MakeWindow(int n, int overlap)
@@ -194,29 +208,6 @@ public sealed class Htdemucs6sSeparator : IStemSeparator
             w[n - 1 - i] = fade;
         }
         return w;
-    }
-
-    private static float[,] LoadStereoFloatWave(string path, out int sampleRate)
-    {
-        using var reader = new AudioFileReader(path);
-        sampleRate = reader.WaveFormat.SampleRate;
-
-        var samples = new List<float>();
-        var buffer = new float[reader.WaveFormat.SampleRate * 4];
-        int read;
-        while ((read = reader.Read(buffer, 0, buffer.Length)) > 0)
-            samples.AddRange(buffer.AsSpan(0, read));
-
-        var total = samples.Count / 2;
-        var result = new float[2, total];
-
-        for (var i = 0; i < total; i++)
-        {
-            result[0, i] = samples[2 * i];
-            result[1, i] = samples[2 * i + 1];
-        }
-
-        return result;
     }
 
     private static void WriteFlac(string path, float[,,] stems, int stemIndex, int totalSamples)
@@ -252,5 +243,37 @@ public sealed class Htdemucs6sSeparator : IStemSeparator
         stdin.Close();
 
         ff.Proc!.WaitForExit();
+    }
+
+    private StemSet? CheckExistingStems(StemSeparationRequest request)
+    {
+        var filesToCheck = Enum.GetNames(typeof(StemType))
+            .Select(stemType => (stemType, Path.Combine(request.OutputDirectory,
+                $"{Path.GetFileNameWithoutExtension(request.SourceFilePath)}_{stemType}.flac")))
+            .ToList();
+
+        var stems = new List<StemTrack>();
+        var set = new StemSet
+        {
+            OriginalFilePath = request.SourceFilePath,
+            Stems            = stems
+        };
+
+        foreach (var f in filesToCheck.Where(f => File.Exists(f.Item2)))
+        {
+            using var reader = new AudioFileReader(f.Item2);
+
+            stems.Add(new StemTrack
+            {
+                Type = Enum.Parse<StemType>(f.Item1),
+                Name = Path.GetFileName(f.Item2),
+                FilePath = f.Item2,
+                SampleRate = reader.WaveFormat.SampleRate,
+                Channels = reader.WaveFormat.Channels,
+                Duration = reader.TotalTime
+            });
+        }
+
+        return stems.Count > 0 ? set : null;
     }
 }

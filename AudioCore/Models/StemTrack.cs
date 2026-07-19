@@ -11,4 +11,6 @@ public sealed class StemTrack
     public float[] Waveform  { get; set; } = [];
 
     public long TotalFrames => (long)(Duration.TotalMilliseconds * SampleRate / 1000.0);
+
+    public override string ToString() => $"{Duration} {SampleRate}*{Channels} {Type}: {FilePath}";
 }
