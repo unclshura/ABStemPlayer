@@ -1,4 +1,5 @@
 ﻿using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Windows.Input;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -130,6 +131,41 @@ public sealed partial class PlaybackViewModel : ObservableObject
         await _engine.UpdatePlaybackSpeedAsync(new PlaybackSpeedSettings { Speed = PlaybackSpeed });
 
         await _engine.PlayAsync();
+    }
+
+    partial void OnMixerChanged(MixerViewModel? oldValue, MixerViewModel newValue)
+    {
+        if (oldValue != null)
+        {
+            foreach (var stem in oldValue.Stems)
+            {
+                stem.PropertyChanged -= OnMixerSettingsChanged;
+            }
+        }
+        if (newValue != null)
+        {
+            foreach (var stem in newValue.Stems)
+            {
+                stem.PropertyChanged += OnMixerSettingsChanged;
+            }
+        }
+    }
+
+    private void OnMixerSettingsChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (sender is not StemChannelViewModel stem)
+            return;
+
+        var mixerSettings = new MixerSettings
+        {
+            Stems = Mixer.Stems.Select(x => new StemMixSettings
+            {
+                GainDb  = x.GainDb,
+                Enabled = x.Enabled,
+                Pan     = x.Pan
+            }).ToList()
+        };
+        Task.Run(async () => await _engine.UpdateMixerAsync(mixerSettings));
     }
 
     partial void OnCurrentTimeChanged(TimeSpan value)
