@@ -254,9 +254,7 @@ public sealed partial class PlaybackViewModel : ObservableObject
 
                     var decoder = _decoderFactory.Create(stem);
 
-                    var waveform = await _waveformService.ComputeWaveformAsync(stem, decoder, 200);
-
-                    stem.Waveform = waveform;
+                    stem.Waveform = await _waveformService.ComputeWaveformAsync(stem, decoder, 200).ConfigureAwait(false);
 
                     // Update progress safely
                     var done = Interlocked.Increment(ref completed);

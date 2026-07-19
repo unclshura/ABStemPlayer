@@ -152,15 +152,17 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IAsyncDisp
         try { _stdin ?.Close();   } catch { }
         try { _ff    ?.Dispose(); } catch { }
 
-        if (_readerTask != null)
+        if (_cts != null)
         {
-            Debug.Assert(_cts != null);
-
             _cts.Cancel();
-            try { await _readerTask.ConfigureAwait(false); } catch { }
-            _readerTask = null;
             _cts.Dispose();
             _cts = null;
+        }
+
+        if (_readerTask != null)
+        {
+            try { await _readerTask.ConfigureAwait(false); } catch { }
+            _readerTask = null;
         }
 
         _ff     = null;

@@ -104,16 +104,17 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
         }
     }
 
-    public Task PlayAsync()
+    public async Task PlayAsync()
     {
+        // TODO: fix the pause mode
         lock (_stateLock)
         {
             if (IsPlaying || _session is null)
-                return Task.CompletedTask;
+                return;
 
             if (_pipeline is not null)
             {
-                return Task.CompletedTask;
+                return;
             }
 
             _pipeline = new PipelineState
@@ -130,13 +131,14 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
                 d.Seek(_pendingSeekFrames);
             }
 
+
             _decodedFramePosition = _pendingSeekFrames;
             _outputFramesWritten  = (long)(_decodedFramePosition / Math.Max(_currentSpeed, 0.0001f));
 
-            _pipeline.RenderTask  = Task.Run(() => RenderLoopAsync(_pipeline, _pipeline.Cts.Token));
         }
 
-        return Task.CompletedTask;
+        await _timeStretchEngine.Configure(_session.Speed, _pipeline.Cts.Token).ConfigureAwait(false);
+        _pipeline.RenderTask = Task.Run(() => RenderLoopAsync(_pipeline, _pipeline.Cts.Token));
     }
 
     public Task PauseAsync()
@@ -223,7 +225,9 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
             _outputFramesWritten = (long)(_decodedFramePosition / Math.Max(_currentSpeed, 0.0001f));
         }
 
-        Debug.Assert(_pipeline?.Cts != null);
+        if (_pipeline?.Cts is null)
+            return;
+
         await _timeStretchEngine.Configure(settings, _pipeline!.Cts!.Token).ConfigureAwait(false);
     }
 

@@ -12,56 +12,63 @@ public sealed class StemWaveformService : IStemWaveformService
     public async Task<float[]> ComputeWaveformAsync(StemTrack stem, IStemDecoder decoder, int segments = 200)
     {
         if (segments <= 0)
-        {
             return Array.Empty<float>();
-        }
 
-        var value = await TryReadingFromCache(stem, segments);
-        if (value != null)
-            return value;
+        var cached = await TryReadingFromCache(stem, segments);
+        if (cached != null)
+            return cached;
 
-        var totalFrames = (long)(decoder.Stem.Duration.TotalSeconds * decoder.Stem.SampleRate);
-        var framesPerSegment = Math.Max(1,totalFrames / segments);
+        var totalFrames = (long)(stem.Duration.TotalSeconds * stem.SampleRate);
+        var framesPerSegment = Math.Max(1, totalFrames / segments);
 
-        var result = new float[segments];
+        var sums   = new float[segments];
+        var counts = new int[segments];
 
         decoder.Reset();
 
-        for (var i = 0; i < segments; i++)
+        long globalFramePos = 0;
+
+        while (true)
         {
-            var segmentStart = framesPerSegment * i;
-            decoder.Seek(segmentStart);
-
-            var sum = 0f;
-            var count = 0;
-
-            // Decode only one block per segment
             var block = await decoder.DecodeNextBlockAsync(CancellationToken.None);
-            if (block != null)
+            if (block == null)
+                break;
+
+            try
             {
-                try
-                {
-                    var span = block.Value.Span;
-                    var channels = decoder.Stem.Channels;
+                var span     = block.Value.Span;
+                var channels = stem.Channels;
+                var frames   = block.Value.Frames;
 
-                    for (var s = 0; s < span.Length; s++)
-                    {
-                        var v = span[s];
-                        sum += Math.Abs(v);
-                    }
-
-                    count = span.Length;
-                }
-                finally
+                for (int f = 0; f < frames; f++)
                 {
-                    block.Value.Dispose();
+                    long frameIndex = globalFramePos + f;
+                    int segmentIndex = (int)(frameIndex / framesPerSegment);
+
+                    if (segmentIndex >= segments)
+                        break;
+
+                    // accumulate absolute amplitude across channels
+                    float sum = 0f;
+                    int baseIndex = f * channels;
+
+                    for (int c = 0; c < channels; c++)
+                        sum += Math.Abs(span[baseIndex + c]);
+
+                    sums[segmentIndex] += sum;
+                    counts[segmentIndex] += channels;
                 }
             }
-
-            result[i] = count > 0 ? sum / count : 0f;
-
-            await Task.Yield();
+            finally
+            {
+                globalFramePos += block.Value.Frames;
+                block.Value.Dispose();
+            }
         }
+
+        var result = new float[segments];
+        for (int i = 0; i < segments; i++)
+            result[i] = counts[i] > 0 ? sums[i] / counts[i] : 0f;
 
         await SaveToCache(stem, result);
         return result;

@@ -27,8 +27,8 @@ public sealed class Htdemucs6sSeparator : IStemSeparator
             return existingStems;
 
         var mix = LoadStereoFloatWave(request.SourceFilePath, out var sr);
-        if (sr != _sampleRate)
-            throw new InvalidOperationException($"Input must be {_sampleRate} Hz");
+        //if (sr != _sampleRate)
+        //    throw new InvalidOperationException($"Input must be {_sampleRate} Hz");
 
         var totalSamples = mix.GetLength(1);
 
