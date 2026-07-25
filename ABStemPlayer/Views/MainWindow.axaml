@@ -39,14 +39,12 @@
               Grid.Column="0"
               Margin="8">
 
-            <ScrollViewer Margin="8"
-                          VerticalScrollBarVisibility="Auto">
-
+            <ScrollViewer Margin="8" VerticalScrollBarVisibility="Auto">
                 <ItemsControl ItemsSource="{Binding Bands}"
                               Margin="0,2">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <StackPanel Orientation="Vertical"/>
+                            <VirtualizingStackPanel Orientation="Vertical"/>
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
 
@@ -56,7 +54,6 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
-
             </ScrollViewer>
         </Grid>
 
