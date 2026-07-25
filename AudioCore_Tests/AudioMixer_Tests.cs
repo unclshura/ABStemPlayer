@@ -147,7 +147,7 @@ public sealed class AudioMixer_Tests
 
     [TestMethod]
     [TestCategory("ProductionBugSuspected")]
-    [Ignore("ProductionBugSuspected")]
+    //[Ignore("ProductionBugSuspected")]
     public void Mixer_Handles_Mono_Stem()
     {
         // mono block

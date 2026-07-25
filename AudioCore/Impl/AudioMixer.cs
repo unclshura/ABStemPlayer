@@ -50,18 +50,34 @@ public sealed class AudioMixer : IAudioMixer
 
             for (var i = 0; i < frames; i++)
             {
-                if (i * inChannels + 1 >= inSpan.Length)
+                var baseIndex = i * inChannels;
+
+                // If there are no samples for this frame, skip
+                if (baseIndex >= inSpan.Length)
                 {
                     outSpan[i * 2 + 0] = 0f;
                     outSpan[i * 2 + 1] = 0f;
                     continue;
                 }
 
-                var l = inChannels > 1 ? inSpan[i * inChannels + 0] : inSpan[i];
-                var r = inChannels > 1 ? inSpan[i * inChannels + 1] : inSpan[i];
+                if (inChannels == 1)
+                {
+                    var inp = inSpan[baseIndex];
+                    outSpan[i * 2 + 0] += inp * leftGain;
+                    outSpan[i * 2 + 1] += inp * rightGain;
+                }
+                else
+                {
+                    // ensure both left and right samples exist for multi-channel input
+                    if (baseIndex + 1 >= inSpan.Length)
+                        continue; // or treat missing right as 0, depending on desired behavior
 
-                outSpan[i * 2 + 0] += l * leftGain;
-                outSpan[i * 2 + 1] += r * rightGain;
+                    var l = inSpan[baseIndex + 0];
+                    var r = inSpan[baseIndex + 1];
+
+                    outSpan[i * 2 + 0] += l * leftGain;
+                    outSpan[i * 2 + 1] += r * rightGain;
+                }
             }
         }
 

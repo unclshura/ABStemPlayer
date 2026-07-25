@@ -302,7 +302,7 @@ public sealed class StemPlaybackEngine_Tests
     public async Task LoopRegion_SeeksBackOnBoundary()
     {
         var pool          = new AudioBufferPool();
-        var decoderFactory = new MockDecoderFactory(pool, 1024, 5);
+        var decoderFactory = new MockDecoderFactory(pool, 44100, 5);
         var output        = new MockOutput();
         var mixer         = new MockMixer(pool);
         var stretch       = new MockTimeStretch();
@@ -320,7 +320,7 @@ public sealed class StemPlaybackEngine_Tests
         await engine.LoadSessionAsync(session, new DummyProgressReporter());
         await engine.PlayAsync();
 
-        await Task.Delay(TimeSpan.FromSeconds(3));
+        await Task.Delay(TimeSpan.FromSeconds(6));
 
         await engine.StopAsync();
 

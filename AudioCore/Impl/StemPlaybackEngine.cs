@@ -343,9 +343,17 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 
                 if (loopEnabled && loopEnd > loopStart && nextPosition >= loopEnd)
                 {
+                    // Rewind decoders to the loop start and continue decoding so playback loops
+                    foreach (var d in decodersSnapshot)
+                    {
+                        try { d.Seek(loopStart); } catch { }
+                    }
+
                     lock (_stateLock)
-                        _decodedFramePosition = loopEnd;
-                    break;
+                        _decodedFramePosition = loopStart;
+
+                    // continue decoding from the loop start
+                    continue;
                 }
 
                 lock (_stateLock)
