@@ -118,7 +118,7 @@ public sealed class StemWaveformService_Tests
 
         var service = new StemWaveformService(pool);
 
-        var result = await service.ComputeWaveformAsync(new StemTrack(), decoder, 5);
+        var result = await service.ComputeWaveformAsync(new StemTrack { Duration = TimeSpan.FromSeconds(1), SampleRate = 5120, Channels = 2 }, decoder, 5);
 
         bool anyNonZero = false;
         foreach (var v in result)

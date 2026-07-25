@@ -37,15 +37,15 @@ public sealed class Pipeline_Integration_Tests
     [TestMethod]
     public async Task FullPipeline_Decoder_Mixer_Encoder_Works()
     {
-        var pool          = new AudioBufferPool();
-        var readerFactory = new FfmpegAudioReaderFactory();
+        var pool           = new AudioBufferPool();
+        var readerFactory  = new FfmpegAudioReaderFactory();
         var decoderFactory = new StemDecoderFactory(readerFactory, pool);
-        var mixer         = new AudioMixer(pool);
+        var mixer          = new AudioMixer(pool);
 
         var stems = new[]
         {
-            new StemTrack { FilePath = _inputPath, Name = "stem1" },
-            new StemTrack { FilePath = _inputPath, Name = "stem2" }
+            new StemTrack { FilePath = _inputPath, Name = "stem1", Channels = 2, SampleRate = 44100 },
+            new StemTrack { FilePath = _inputPath, Name = "stem2", Channels = 2, SampleRate = 44100 }
         };
 
         var decoders = stems
@@ -82,7 +82,7 @@ public sealed class Pipeline_Integration_Tests
 
         _ = Task.Run(() => DrainStderr(ff));
 
-        var running = true;
+        bool running = true;
 
         while (true)
         {
@@ -106,11 +106,21 @@ public sealed class Pipeline_Integration_Tests
             if (!running)
                 break;
 
-            var mixed = mixer.Mix(blocks, settings);
+            // Convert AudioBlock → TimeStretchedAudioBlock (identity)
+            var tsBlocks = blocks
+                .Select(b => new TimeStretchedAudioBlock(
+                    b.Buffer,
+                    b.Frames,
+                    b.Channels,
+                    b.SampleRate,
+                    b.Position))
+                .ToArray();
+
+            var mixed = mixer.Mix(tsBlocks, settings);
 
             // Convert float → bytes
             ReadOnlySpan<float> span = mixed.Buffer.Span;
-            ReadOnlyMemory<byte> bytes = MemoryMarshal.AsBytes(span).ToArray();
+            byte[] bytes = MemoryMarshal.AsBytes(span).ToArray();
 
             await stdin.WriteAsync(bytes, CancellationToken.None);
             await stdin.FlushAsync(CancellationToken.None);

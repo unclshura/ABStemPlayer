@@ -4,29 +4,29 @@ public sealed class AudioMixer : IAudioMixer
 {
     private readonly AudioBufferPool _pool;
 
+    private const int _outputChannels = 2;
+
     public AudioMixer(AudioBufferPool pool)
     {
         _pool = pool;
     }
 
     public MixedAudioBlock Mix(
-        IReadOnlyList<AudioBlock> stemBlocks,
+        IReadOnlyList<TimeStretchedAudioBlock> stemBlocks,
         MixerSettings settings)
     {
         if (stemBlocks.Count == 0)
             throw new ArgumentException("No stems provided");
 
         // All blocks must have same sample rate and frame count
-        var first = stemBlocks[0];
-        var frames = first.Buffer.Length / first.Channels;
+        var first      = stemBlocks[0];
+        var frames     = first.Frames;
         var sampleRate = first.SampleRate;
-        var position = first.Position;
-
-        const int outputChannels = 2;
+        var position   = first.Position;
 
         // Rent output buffer
-        var outBuf = _pool.Rent(frames * outputChannels);
-        outBuf.Length = frames * outputChannels;
+        var outBuf = _pool.Rent(frames * _outputChannels);
+        outBuf.Length = frames * _outputChannels;
 
         Span<float> outSpan = outBuf.Span;
         outSpan.Clear();
@@ -50,6 +50,13 @@ public sealed class AudioMixer : IAudioMixer
 
             for (var i = 0; i < frames; i++)
             {
+                if (i * inChannels + 1 >= inSpan.Length)
+                {
+                    outSpan[i * 2 + 0] = 0f;
+                    outSpan[i * 2 + 1] = 0f;
+                    continue;
+                }
+
                 var l = inChannels > 1 ? inSpan[i * inChannels + 0] : inSpan[i];
                 var r = inChannels > 1 ? inSpan[i * inChannels + 1] : inSpan[i];
 
@@ -59,7 +66,7 @@ public sealed class AudioMixer : IAudioMixer
         }
 
 
-        return new MixedAudioBlock(outBuf, frames, outputChannels, sampleRate, position);
+        return new MixedAudioBlock(outBuf, frames, _outputChannels, sampleRate, position);
     }
 
     private static float DbToLinear(float db)

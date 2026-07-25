@@ -1,4 +1,6 @@
-﻿namespace AudioCore.Models;
+﻿using NAudio.Mixer;
+
+namespace AudioCore.Models;
 
 public sealed class StemMixSettings
 {
@@ -12,5 +14,8 @@ public sealed class StemMixSettings
 public sealed class MixerSettings
 {
     public required IReadOnlyList<StemMixSettings> Stems { get; init; }
+
+    public override string ToString() => $"Mixer: {Stems.Count}";
+
 }
 

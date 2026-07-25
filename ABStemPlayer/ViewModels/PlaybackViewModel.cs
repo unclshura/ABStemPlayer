@@ -1,6 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Windows.Input;
+using ABStemPlayer.Models;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Platform.Storage;
@@ -14,6 +15,9 @@ public sealed partial class PlaybackViewModel : ObservableObject
     private readonly IStemSeparator       _separator;
     private readonly IStemDecoderFactory  _decoderFactory;
     private readonly IStemWaveformService _waveformService;
+
+    private readonly DelayedExec _delayedMixerUpdate = new(TimeSpan.FromMilliseconds(500));
+    private readonly DelayedExec _delayedSpeedUpdate = new(TimeSpan.FromMilliseconds(500));
 
     // -----------------------------
     // Conversion mode properties
@@ -165,7 +169,7 @@ public sealed partial class PlaybackViewModel : ObservableObject
                 Pan     = x.Pan
             }).ToList()
         };
-        Task.Run(async () => await _engine.UpdateMixerAsync(mixerSettings));
+        _delayedMixerUpdate.Exec(async (ct) => await _engine.UpdateMixerAsync(mixerSettings));
     }
 
     partial void OnCurrentTimeChanged(TimeSpan value)
@@ -186,7 +190,7 @@ public sealed partial class PlaybackViewModel : ObservableObject
 
     partial void OnPlaybackSpeedChanged(float value)
     {
-        Task.Run( async () => await _engine.UpdatePlaybackSpeedAsync(new PlaybackSpeedSettings { Speed = PlaybackSpeed }));
+        _delayedSpeedUpdate.Exec(async (ct) => await _engine.UpdatePlaybackSpeedAsync(new PlaybackSpeedSettings { Speed = PlaybackSpeed }));
     }
 
     // -----------------------------

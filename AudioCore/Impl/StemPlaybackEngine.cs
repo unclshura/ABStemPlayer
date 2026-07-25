@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics;
-using System.Threading;
 using NAudio.Wave;
+using static AudioCore.Models.Tracer;
 
 namespace AudioCore.Impl;
 
@@ -43,9 +43,6 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
     private long                         _loopStartFrames;
     private long                         _loopEndFrames;
 
-    private long                         _outputFramesWritten;
-    private float                        _currentSpeed = 1.0f;
-
     private bool IsPlaying => _outputDevice.State == PlaybackState.Playing;
     private IProgressReporter<double>?   _progressReporter;
 
@@ -75,6 +72,8 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 
     public async Task LoadSessionAsync(PlaybackSession session, IProgressReporter<double> progress)
     {
+        Trace(session);
+
         await StopAsync().ConfigureAwait(false);
 
         await _timeStretchEngine.Configure(session.Speed, CancellationToken.None).ConfigureAwait(false);
@@ -83,8 +82,6 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
         {
             _session = session;
             _progressReporter = progress;
-
-            _currentSpeed = session.Speed.Speed;
 
             _loopRegion = session.Loop;
             if (_loopRegion.IsEnabled)
@@ -100,22 +97,20 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 
             _pendingSeekFrames = 0;
             _decodedFramePosition = 0;
-            _outputFramesWritten = 0;
         }
     }
 
     public async Task PlayAsync()
     {
-        // TODO: fix the pause mode
+        Trace();
+
         lock (_stateLock)
         {
             if (IsPlaying || _session is null)
                 return;
 
             if (_pipeline is not null)
-            {
                 return;
-            }
 
             _pipeline = new PipelineState
             {
@@ -131,18 +126,16 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
                 d.Seek(_pendingSeekFrames);
             }
 
-
             _decodedFramePosition = _pendingSeekFrames;
-            _outputFramesWritten  = (long)(_decodedFramePosition / Math.Max(_currentSpeed, 0.0001f));
-
         }
 
-        await _timeStretchEngine.Configure(_session.Speed, _pipeline.Cts.Token).ConfigureAwait(false);
         _pipeline.RenderTask = Task.Run(() => RenderLoopAsync(_pipeline, _pipeline.Cts.Token));
     }
 
     public Task PauseAsync()
     {
+        Trace();
+
         lock (_stateLock)
         {
             if (!IsPlaying)
@@ -157,9 +150,13 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
         return Task.CompletedTask;
     }
 
+
     public async Task StopAsync()
     {
+        Trace();
         PipelineState? pipelineToDispose;
+
+        Trace();
 
         lock (_stateLock)
         {
@@ -168,7 +165,6 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 
             _decodedFramePosition = 0;
             _pendingSeekFrames = 0;
-            _outputFramesWritten = 0;
 
             pipelineToDispose = _pipeline;
             _pipeline = null;
@@ -193,6 +189,8 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 
     public Task SeekAsync(TimeSpan position)
     {
+        Trace(position);
+
         var frameIndex = TimeToFrames(position);
 
         lock (_stateLock)
@@ -205,12 +203,10 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
                     d.Seek(frameIndex);
 
                 _decodedFramePosition = frameIndex;
-                _outputFramesWritten = (long)(_decodedFramePosition / Math.Max(_currentSpeed, 0.0001f));
             }
             else
             {
                 _decodedFramePosition = frameIndex;
-                _outputFramesWritten = (long)(_decodedFramePosition / Math.Max(_currentSpeed, 0.0001f));
             }
         }
 
@@ -219,20 +215,15 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 
     public async Task UpdatePlaybackSpeedAsync(PlaybackSpeedSettings settings)
     {
-        lock (_stateLock)
-        {
-            _currentSpeed = settings.Speed;
-            _outputFramesWritten = (long)(_decodedFramePosition / Math.Max(_currentSpeed, 0.0001f));
-        }
+        Trace(settings);
 
-        if (_pipeline?.Cts is null)
-            return;
-
-        await _timeStretchEngine.Configure(settings, _pipeline!.Cts!.Token).ConfigureAwait(false);
+        await _timeStretchEngine.Configure(settings, _pipeline?.Cts?.Token ?? CancellationToken.None).ConfigureAwait(false);
     }
 
     public Task UpdateMixerAsync(MixerSettings settings)
     {
+        Trace(settings);
+
         lock (_stateLock)
         {
             if (_session is not null)
@@ -244,6 +235,8 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 
     public void SetLoop(TimeSpan start, TimeSpan end)
     {
+        Trace(start, end);
+
         lock (_stateLock)
         {
             _loopRegion = new LoopRegion
@@ -260,6 +253,7 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 
     public void ClearLoop()
     {
+        Trace();
         lock (_stateLock)
         {
             _loopRegion = new LoopRegion
@@ -278,6 +272,8 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 
     private async Task RenderLoopAsync(PipelineState pipeline, CancellationToken token)
     {
+        Trace(pipeline);
+
         if (!pipeline.OutputStarted)
         {
             _outputDevice.Start();
@@ -289,7 +285,6 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
         var decodeTask  = DecodeLoopAsync(pipeline, token);
         var stretchTask = StretchLoopAsync(pipeline, token);
 
-        // Wait for BOTH to finish naturally
         await Task.WhenAll(decodeTask, stretchTask).ConfigureAwait(false);
 
         if (pipeline.OutputStarted)
@@ -299,9 +294,10 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
         }
     }
 
-
     private async Task DecodeLoopAsync(PipelineState pipeline, CancellationToken token)
     {
+        Trace(pipeline);
+
         await Task.Yield();
         var stemBlocks = new List<AudioBlock>(6);
 
@@ -309,23 +305,21 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
         {
             while (!token.IsCancellationRequested)
             {
-                bool            playing;
-                MixerSettings?  mixerSnapshot;
-                IStemDecoder[]  decodersSnapshot;
-                long            loopStart, loopEnd;
-                bool            loopEnabled;
+                bool           playing;
+                IStemDecoder[] decodersSnapshot;
+                long           loopStart, loopEnd;
+                bool           loopEnabled;
 
                 lock (_stateLock)
                 {
                     playing = IsPlaying;
-                    mixerSnapshot = Mixer;
                     decodersSnapshot = pipeline.Decoders;
                     loopStart = _loopStartFrames;
                     loopEnd = _loopEndFrames;
                     loopEnabled = _loopRegion.IsEnabled;
                 }
 
-                if (!playing || mixerSnapshot is null || decodersSnapshot.Length == 0)
+                if (!playing || decodersSnapshot.Length == 0)
                 {
                     await Task.Delay(5, token).ConfigureAwait(false);
                     continue;
@@ -337,14 +331,15 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
                     break;
                 }
 
-                var mixed = _audioMixer.Mix(stemBlocks, mixerSnapshot);
+                // Submit raw stems to time-stretch engine
+                await _timeStretchEngine.IsReadyToAcceptStems(token).ConfigureAwait(false);
+                await _timeStretchEngine.SubmitStems(stemBlocks, token).ConfigureAwait(false);
+
+                // Use first stem for position tracking
+                var first = stemBlocks[0];
+                var nextPosition = first.Position + first.Frames;
 
                 DisposeStems(stemBlocks);
-
-                await _timeStretchEngine.IsReadyToAccept(token).ConfigureAwait(false);
-                await _timeStretchEngine.Submit(mixed, token).ConfigureAwait(false);
-
-                var nextPosition = mixed.SamplePosition + mixed.Frames;
 
                 if (loopEnabled && loopEnd > loopStart && nextPosition >= loopEnd)
                 {
@@ -395,16 +390,19 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 
     private async Task StretchLoopAsync(PipelineState pipeline, CancellationToken token)
     {
+        Trace(pipeline);
+
         await Task.Yield();
+        Debug.Assert(Mixer != null, "Mixer settings should be set before starting playback.");
 
         try
         {
             var gotFirstBlock = false;
             while (!token.IsCancellationRequested)
             {
-                var stretched = await _timeStretchEngine.Receive(token).ConfigureAwait(false);
+                var stretchedBlocks = await _timeStretchEngine.ReceiveStems(token).ConfigureAwait(false);
 
-                if (stretched.Buffer == null)
+                if (stretchedBlocks == null || stretchedBlocks.Length == 0 || stretchedBlocks[0].Buffer == null)
                 {
                     if (_decodeCompleted && gotFirstBlock)
                         break; // fully drained
@@ -413,30 +411,24 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
                     continue;
                 }
 
+                MixerSettings? mixerSnapshot;
+                lock (_stateLock)
+                    mixerSnapshot = Mixer;
+
+                var mixed = _audioMixer.Mix(stretchedBlocks, mixerSnapshot);
+
                 await _outputDevice.IsReadyToAccept(token).ConfigureAwait(false);
 
-                _outputDevice.Write(stretched.Buffer.Span);
+                _outputDevice.Write(mixed.Buffer.Span);
                 gotFirstBlock = true;
-
-                lock (_stateLock)
-                {
-                    _outputFramesWritten += stretched.Frames;
-                }
-
 
                 try
                 {
-                    long sourceFrames;
-                    lock (_stateLock)
-                    {
-                        sourceFrames = (long)(_outputFramesWritten * _currentSpeed);
-                    }
-
                     double progress;
                     lock (_stateLock)
                     {
                         var total = _session?.StemSet.TotalFrames ?? 1L;
-                        progress = (double)sourceFrames / Math.Max(total, 1L);
+                        progress = (double)mixed.Position / Math.Max(total, 1L);
                     }
 
                     if (_progressReporter != null)
@@ -444,13 +436,17 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
                 }
                 catch { }
 
-                try { stretched.Dispose(); } catch { }
+                try { mixed.Dispose(); } catch { }
+                foreach (var b in stretchedBlocks)
+                {
+                    try { b.Dispose(); } catch { }
+                }
             }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Debug.WriteLine($"StemPlaybackEngine: Error in PlaybackLoopAsync: {ex.Message}");
+            Debug.WriteLine($"StemPlaybackEngine: Error in StretchLoopAsync: {ex.Message}");
             try { pipeline.Cts?.Cancel(); } catch { }
         }
     }
@@ -462,6 +458,8 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 
     public void Dispose()
     {
+        Trace();
+
         _ = StopAsync();
 
         if (_pipeline is not null)

@@ -36,6 +36,8 @@ public sealed class StemWaveformService_RealDecoder_Tests
     public async Task ComputeWaveform_RealDecoder_ReturnsCorrectLength()
     {
         var path = GetTestInputPath();
+        var cacheFile = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path)!, $"{System.IO.Path.GetFileNameWithoutExtension(path)}.waveform");
+        try { System.IO.File.Delete(cacheFile); } catch { }
         var pool = new AudioBufferPool();
 
         var reader = new FfmpegAudioReader(path);
@@ -54,29 +56,38 @@ public sealed class StemWaveformService_RealDecoder_Tests
     [TestMethod]
     public async Task ComputeWaveform_RealDecoder_ProducesNonZeroValues()
     {
-        var path = GetTestInputPath();
-        var pool = new AudioBufferPool();
-
-        var reader = new FfmpegAudioReader(path);
-        var stem = CreateStem(path);
-
-        using var decoder = new StemDecoder(reader, pool, stem, blockSize: 4096);
-
-        var service = new StemWaveformService(pool);
-
-        var result = await service.ComputeWaveformAsync(stem, decoder, 10);
-
-        bool anyNonZero = false;
-        foreach (var v in result)
+        var original = GetTestInputPath();
+        var path = Path.Combine(Path.GetTempPath(), $"test_input_{Guid.NewGuid()}.mp3");
+        File.Copy(original, path);
+        try
         {
-            if (v > 0f)
-            {
-                anyNonZero = true;
-                break;
-            }
-        }
+            var pool = new AudioBufferPool();
 
-        Assert.IsTrue(anyNonZero);
+            var reader = new FfmpegAudioReader(path);
+            var stem = CreateStem(path);
+
+            using var decoder = new StemDecoder(reader, pool, stem, blockSize: 4096);
+
+            var service = new StemWaveformService(pool);
+
+            var result = await service.ComputeWaveformAsync(stem, decoder, 10);
+
+            bool anyNonZero = false;
+            foreach (var v in result)
+            {
+                if (v > 0f)
+                {
+                    anyNonZero = true;
+                    break;
+                }
+            }
+
+            Assert.IsTrue(anyNonZero);
+        }
+        finally
+        {
+            try { File.Delete(path); } catch { }
+        }
     }
 
     [TestMethod]
@@ -84,6 +95,11 @@ public sealed class StemWaveformService_RealDecoder_Tests
     {
         var path = GetTestInputPath();
         var pool = new AudioBufferPool();
+
+        // Ensure any existing cache for this input is removed before running the test
+        var cacheFile = Path.Combine(Path.GetDirectoryName(path)!, $"{Path.GetFileNameWithoutExtension(path)}.waveform");
+        if (File.Exists(cacheFile))
+            File.Delete(cacheFile);
 
         var reader = new FfmpegAudioReader(path);
         var stem = CreateStem(path);

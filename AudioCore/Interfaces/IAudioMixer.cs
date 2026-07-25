@@ -3,6 +3,6 @@ namespace AudioCore.Interfaces;
 public interface IAudioMixer
 {
     MixedAudioBlock Mix(
-        IReadOnlyList<AudioBlock> stemBlocks,
+        IReadOnlyList<TimeStretchedAudioBlock> stemBlocks,
         MixerSettings settings);
 }

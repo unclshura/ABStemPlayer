@@ -22,7 +22,7 @@ public sealed class FfmpegAudioReader_Tests
     {
         using var reader = new FfmpegAudioReader(_inputPath);
 
-        Assert.AreEqual(44100, reader.SampleRate);
+        Assert.AreEqual(FfprobeProcess.ProbeAudio(_inputPath).SampleRate, reader.SampleRate);
         Assert.AreEqual(2, reader.Channels);
         Assert.IsGreaterThan(0, reader.TotalSamples);
     }
@@ -134,7 +134,7 @@ public sealed class FfmpegAudioReader_Tests
 
             using var reader = new FfmpegAudioReader(flacPath);
 
-            Assert.AreEqual(44100, reader.SampleRate);
+            Assert.AreEqual(FfprobeProcess.ProbeAudio(flacPath).SampleRate, reader.SampleRate);
             Assert.AreEqual(2, reader.Channels);
             Assert.IsGreaterThan(0, reader.TotalSamples);
 

@@ -8,7 +8,7 @@ public readonly struct MixedAudioBlock : IDisposable
     public int         Frames         { get; }
     public int         Channels       { get; }
     public int         SampleRate     { get; }
-    public long        SamplePosition { get; }
+    public long        Position { get; }
 
     public MixedAudioBlock(AudioBuffer<float> buffer, int frames, int channels, int sampleRate, long samplePosition)
     {
@@ -16,7 +16,7 @@ public readonly struct MixedAudioBlock : IDisposable
         Frames         = frames;
         Channels       = channels;
         SampleRate     = sampleRate;
-        SamplePosition = samplePosition;
+        Position = samplePosition;
     }
 
     public void Dispose() => Buffer.Dispose();

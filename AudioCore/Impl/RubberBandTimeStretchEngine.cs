@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
+using static AudioCore.Models.Tracer;
 
 namespace AudioCore.Impl;
 
@@ -7,171 +8,317 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IAsyncDisp
 {
     private readonly AudioBufferPool _pool;
     private readonly int             _sampleRate;
-    private readonly int             _channels;
+    private long[] _sourcePositions;
 
-    private FfmpegProcess?           _ff;
-    private Stream?                  _stdin;
-    private Stream?                  _stdout;
+    // One RubberBand/ffmpeg process per stem (each is stereo: 2 channels)
+    private sealed class StemProcess : IDisposable
+    {
+        public readonly int StemIndex;
+        public FfmpegProcess? Ff;
+        public Stream?        Stdin;
+        public Stream?        Stdout;
+        public BlockingRingBuffer Ring;
 
-    private BlockingRingBuffer       _ring;
+        public StemProcess(int stemIndex, int sampleRate)
+        {
+            StemIndex = stemIndex;
+            // 2 channels per stem
+            var bytesPerSecond = sampleRate * 2 * sizeof(float);
+            Ring = new BlockingRingBuffer(bytesPerSecond * 2);
+        }
+
+        public void Dispose()
+        {
+            try { Stdout?.Close(); } catch { }
+            try { Stdin?.Close();  } catch { }
+            try { Ff?.Dispose();   } catch { }
+            Ring.Reset();
+        }
+    }
+
+    private readonly List<StemProcess> _stemProcesses = new();
+    private readonly int _stemCount;
+
     private float                    _speed = 1.0f;
-
-    private Task?                    _readerTask;
     private CancellationTokenSource? _cts;
     private CancellationToken        _token;
+    private Task?                    _readerTask;
 
-    public RubberBandTimeStretchEngine(AudioBufferPool pool, int sampleRate = 44100, int channels = 2)
+    public RubberBandTimeStretchEngine(AudioBufferPool pool, int sampleRate = 44100, int stemCount = 6)
     {
-        _pool              = pool;
-        _sampleRate        = sampleRate;
-        _channels          = channels;
-
-        var bytesPerSecond = sampleRate * channels * sizeof(float);
-        _ring              = new BlockingRingBuffer( bytesPerSecond * 2);
+        _pool                   = pool;
+        _sampleRate             = sampleRate;
+        _stemProcesses.Capacity = stemCount;
+        _stemCount              = stemCount;
+        _sourcePositions = new long[_stemCount];
     }
 
     public async Task Configure(PlaybackSpeedSettings settings, CancellationToken token)
     {
+        Trace(settings);
         _speed = settings.Speed;
-        
-        if ( _cts != null && _ff != null )
-            await DisposeProcess().ConfigureAwait(false);
 
-        _ring.Reset();
-        _token = token;
+        if (_cts != null)
+            await DisposeProcesses().ConfigureAwait(false);
+
+        if ( token != CancellationToken.None )
+            _token = token;
     }
 
-    public Task IsReadyToAccept(CancellationToken token) => _ring.WaitForRoomToWrite(token);
 
-    public Task Submit(MixedAudioBlock input, CancellationToken token)
+    public Task IsReadyToAcceptStems(CancellationToken token)
     {
-        // No-stretch path: enqueue block and signal semaphore
+        EnsureStemProcesses(_stemCount);
+        // Wait until all rings have room (simple check: any one is fine for now)
+        return Task.CompletedTask;
+    }
+
+    public Task SubmitStems(IReadOnlyList<AudioBlock> stemBlocks, CancellationToken token)
+    {
+        if ( stemBlocks.Count != _stemCount)
+            throw new ArgumentException($"Expected {_stemCount} stems, but got {stemBlocks.Count}.");
+
+        // No-stretch path: just enqueue into per-stem rings
         if (Math.Abs(_speed - 1.0f) < 0.01f)
         {
-            var b = MemoryMarshal.AsBytes(input.Buffer.Span);
-            _ring.Write(b, b.Length, token);
+            EnsureStemProcesses(stemBlocks.Count);
+
+            for (int i = 0; i < stemBlocks.Count; i++)
+            {
+                var proc = _stemProcesses[i];
+                var bytes = MemoryMarshal.AsBytes(stemBlocks[i].Buffer.Span);
+                proc.Ring.Write(bytes, bytes.Length, token);
+            }
 
             return Task.CompletedTask;
         }
 
-        if (_ff is null)
-            StartProcess();
+        // Stretch path: one ffmpeg+rubberband per stem
+        EnsureStemProcesses(stemBlocks.Count);
+        StartProcessesIfNeeded(stemBlocks.Count);
 
-        var span  = input.Buffer.Span;
-        var bytes = MemoryMarshal.AsBytes(span);
+        for (int i = 0; i < stemBlocks.Count; i++)
+        {
+            var proc  = _stemProcesses[i];
+            var span  = stemBlocks[i].Buffer.Span;
+            var bytes = MemoryMarshal.AsBytes(span);
 
-        _stdin!.Write(bytes);
-        _stdin.Flush();
+            try
+            {
+                if (token.IsCancellationRequested)
+                    return Task.CompletedTask;
+
+                if (proc.Stdin != null && !(proc.Ff?.Proc?.HasExited ?? true))
+                    proc.Stdin.Write(bytes);
+
+                if (token.IsCancellationRequested)
+                    return Task.CompletedTask;
+                try
+                {
+                    proc.Stdin.Flush();
+                }
+                catch (System.ObjectDisposedException)
+                {
+                    // process has exited
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        }
 
         return Task.CompletedTask;
     }
 
-    public async Task<TimeStretchedAudioBlock> Receive(CancellationToken token)
+    public async Task<TimeStretchedAudioBlock[]> ReceiveStems(CancellationToken token)
     {
-        int available = 0;
-        while (!token.IsCancellationRequested)
-        {
-            available = await _ring.WaitForDataToRead(token).ConfigureAwait(false);
-            if (available > 0)
-                break;
+        EnsureStemProcesses(_stemCount);
 
-            await Task.Delay(2).ConfigureAwait(false);
+        int framesPerBlock   = (int)(_sampleRate / 2);     // 0.5 seconds
+        int samplesPerBlock  = framesPerBlock * 2;         // stereo
+        int bytesPerBlock    = samplesPerBlock * sizeof(float);
+
+        var result = new TimeStretchedAudioBlock[_stemCount];
+
+        for (int i = 0; i < _stemCount; i++)
+        {
+            var proc = _stemProcesses[i];
+
+            // Wait until *some* data is available
+            int available = 0;
+            while (!token.IsCancellationRequested)
+            {
+                available = await proc.Ring.WaitForDataToRead(token).ConfigureAwait(false);
+                if (available > 0)
+                    break;
+
+                await Task.Delay(1, token).ConfigureAwait(false);
+            }
+
+            if (token.IsCancellationRequested)
+                return Array.Empty<TimeStretchedAudioBlock>();
+
+            // Determine block size (final block may be smaller)
+            int bytesToRead = Math.Min(bytesPerBlock, available);
+            int samplesToRead = bytesToRead / sizeof(float);
+            int framesToRead  = samplesToRead / 2;
+
+            // Allocate a temporary byte[] buffer (safe across await)
+            byte[] temp = new byte[bytesToRead];
+
+            int totalRead = 0;
+
+            // Read exactly bytesToRead into temp[]
+            while (totalRead < bytesToRead && !token.IsCancellationRequested)
+            {
+                int toRead = bytesToRead - totalRead;
+                int read   = proc.Ring.Read(temp.AsSpan(totalRead, toRead), toRead);
+
+                if (read > 0)
+                {
+                    totalRead += read;
+                    continue;
+                }
+
+                await Task.Delay(1, token).ConfigureAwait(false);
+            }
+
+            if (token.IsCancellationRequested)
+                return Array.Empty<TimeStretchedAudioBlock>();
+
+            // Now allocate the float buffer
+            var outBuf = _pool.Rent(samplesToRead);
+            outBuf.Length = samplesToRead;
+
+            // Copy temp[] → float buffer (safe, no await)
+            var outBytes = MemoryMarshal.AsBytes(outBuf.Span);
+            temp.AsSpan().CopyTo(outBytes);
+
+            // Compute source position
+            long sourceFrames = (long)(framesToRead * _speed);
+            long sourcePos    = _sourcePositions[i];
+            _sourcePositions[i] += sourceFrames;
+
+            result[i] = new TimeStretchedAudioBlock(
+                outBuf,
+                framesToRead,
+                2,
+                _sampleRate,
+                sourcePos);
         }
 
-        if (token.IsCancellationRequested)
-            return default;
-
-        var maxFloats = available / sizeof(float);
-        var outBuf    = _pool.Rent(maxFloats);
-        var outBytes  = MemoryMarshal.AsBytes(outBuf.Span);
-
-        var readBytes = _ring.Read(outBytes, outBytes.Length);
-        if (readBytes <= 0)
-        {
-            outBuf.Dispose();
-            Debug.WriteLine("RubberBandTimeStretchEngine: Failed to drain ring buffer.");
-            return default;
-        }
-
-        var frames = readBytes / (_channels * sizeof(float));
-        outBuf.Length = frames * _channels;
-
-        return new TimeStretchedAudioBlock(outBuf, frames, _channels, _sampleRate);
+        return result;
     }
 
 
-    private void StartProcess()
+    private void EnsureStemProcesses(int stemCount)
     {
-        var cmd =
-            $"-hide_banner -loglevel error " +
-            $"-f f32le -ar {_sampleRate} -ac {_channels} -i pipe:0 " +
-            $"-af \"rubberband=tempo={_speed}\" " +
-            $"-f f32le -ar {_sampleRate} -ac {_channels} pipe:1";
-
-        _ff = new FfmpegProcess(
-            name: $"rubberband:{_speed:F3}",
-            commandLine: cmd,
-            redirectOutput: true,
-            redirectInput: true);
-
-        _ff.StartProcess();
-
-        _stdin = _ff.Stdin!;
-        _stdout = _ff.Stdout!;
-
-        Debug.Assert(_cts == null);
-
-        _cts           = CancellationTokenSource.CreateLinkedTokenSource(_token);
-        _readerTask    = Task.Run(ReaderLoop);
+        while (_stemProcesses.Count < stemCount)
+            _stemProcesses.Add(new StemProcess(_stemProcesses.Count, _sampleRate));
     }
 
-    private async Task ReaderLoop()
+    private void StartProcessesIfNeeded(int stemCount)
     {
-        Debug.Assert(_cts != null);
+        if (_cts != null)
+            return;
+
+        Msg("Starting RubberBand/ffmpeg processes for {stemCount} stems at speed {_speed:F2}...");
+
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(_token);
+
+        for (int i = 0; i < stemCount; i++)
+        {
+            var proc = _stemProcesses[i];
+            if (proc.Ff != null)
+                continue;
+
+            var cmd =
+                "-hide_banner -loglevel error " +
+                $"-f f32le -ar {_sampleRate} -ac 2 -i pipe:0 " +
+                $"-af \"rubberband=tempo={_speed}\" " +
+                $"-f f32le -ar {_sampleRate} -ac 2 pipe:1";
+
+            proc.Ff = new FfmpegProcess(
+                name: $"rubberband:stem{i}:{_speed:F3}",
+                commandLine: cmd,
+                redirectOutput: true,
+                redirectInput: true);
+
+            proc.Ff.StartProcess();
+
+            proc.Stdin = proc.Ff.Stdin!;
+            proc.Stdout = proc.Ff.Stdout!;
+        }
+
+        _readerTask = Task.Run(() => ReaderLoop(_cts.Token));
+    }
+
+    private async Task ReaderLoop(CancellationToken token)
+    {
+        Trace();
 
         var buf = new byte[4096];
 
         try
         {
-            while (!_cts.Token.IsCancellationRequested)
+            while (!token.IsCancellationRequested)
             {
-                var read = await _stdout!.ReadAsync(buf, 0, buf.Length, _cts.Token).ConfigureAwait(false);
-                if (read <= 0)
-                    break;
+                bool anyActive = false;
 
-                _ring.Write(buf, read, _cts.Token);
+                foreach (var proc in _stemProcesses)
+                {
+                    if (proc.Stdout == null)
+                        continue;
+
+                    anyActive = true;
+
+                    var read = await proc.Stdout.ReadAsync(buf, 0, buf.Length, token).ConfigureAwait(false);
+                    if (read > 0)
+                        proc.Ring.Write(buf, read, token);
+                }
+
+                if (!anyActive)
+                    break;
             }
         }
         catch { }
     }
 
-
-    private async Task DisposeProcess()
+    private async Task DisposeProcesses()
     {
-        try { _stdout?.Close();   } catch { }
-        try { _stdin ?.Close();   } catch { }
-        try { _ff    ?.Dispose(); } catch { }
-
         if (_cts != null)
         {
-            _cts.Cancel();
-            _cts.Dispose();
-            _cts = null;
+            Msg("Cancelling RubberBand/ffmpeg reader task...");
+            try { _cts.Cancel(); } catch { }
         }
 
         if (_readerTask != null)
         {
+            Msg("Waiting for RubberBand/ffmpeg reader task to complete...");
             try { await _readerTask.ConfigureAwait(false); } catch { }
             _readerTask = null;
         }
 
-        _ff     = null;
-        _stdin  = null;
-        _stdout = null;
+        if (_stemProcesses.Count > 0)
+        {
+            Msg("Disposing RubberBand/ffmpeg processes...");
+            foreach (var proc in _stemProcesses)
+                proc.Dispose();
+
+            _stemProcesses.Clear();
+        }
+
+        if (_cts != null)
+        {
+            _cts.Dispose();
+            _cts = null;
+        }
     }
 
     public async ValueTask DisposeAsync()
     {
-        await DisposeProcess().ConfigureAwait(false);
+        Trace();
+        await DisposeProcesses().ConfigureAwait(false);
     }
 }

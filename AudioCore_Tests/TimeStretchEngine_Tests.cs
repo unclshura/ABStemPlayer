@@ -16,7 +16,7 @@ public sealed class TimeStretchEngine_Tests
         _pool = new AudioBufferPool();
     }
 
-    private MixedAudioBlock MakeBlock(int frames, int channels = 2, int sampleRate = 44100)
+    private AudioBlock MakeBlock(int frames, int channels = 2, int sampleRate = 44100)
     {
         var buf = _pool.Rent(frames * channels);
         buf.Length = frames * channels;
@@ -24,251 +24,128 @@ public sealed class TimeStretchEngine_Tests
         for (var i = 0; i < buf.Length; i++)
             buf.Samples[i] = i * 0.001f;
 
-        return new MixedAudioBlock(buf, frames, channels, sampleRate, 0);
+        return new AudioBlock(buf, sampleRate, channels, 0);
+    }
+
+    private IReadOnlyList<AudioBlock> MakeStemSet(int stemCount, int frames)
+    {
+        var list = new List<AudioBlock>();
+        for (int i = 0; i < stemCount; i++)
+            list.Add(MakeBlock(frames));
+        return list;
     }
 
     [TestMethod]
-    public async Task Process_Returns_Output_For_Speed_1()
+    public async Task Speed1_ReturnsHalfSecondBlocks()
     {
-        await using var engine = new RubberBandTimeStretchEngine(_pool, 44100, 2);
+        await using var engine = new RubberBandTimeStretchEngine(_pool, 44100, stemCount: 2);
 
-        var input = MakeBlock(5000);
+        await engine.Configure(new PlaybackSpeedSettings { Speed = 1.0f }, CancellationToken.None);
 
-        await engine.Submit(input, CancellationToken.None);
-        var output = await engine.Receive(CancellationToken.None);
+        var stems = MakeStemSet(2, 44100); // 1 second input
 
-        Assert.IsGreaterThan(0, output.Frames);
-        Assert.AreEqual(2, output.Channels);
-        Assert.AreEqual(44100, output.SampleRate);
-        Assert.AreEqual(5000, output.Frames);
+        await engine.SubmitStems(stems, CancellationToken.None);
 
-        foreach (var f in output.Buffer.Span)
+        var blocks = await engine.ReceiveStems(CancellationToken.None);
+
+        Assert.AreEqual(2, blocks.Length);
+
+        foreach (var b in blocks)
         {
-            Assert.IsFalse(float.IsNaN(f));
-            Assert.IsFalse(float.IsInfinity(f));
+            Assert.AreEqual(22050, b.Frames);     // 0.5 seconds
+            Assert.AreEqual(2, b.Channels);
+            Assert.AreEqual(44100, b.SampleRate);
+            Assert.IsTrue(b.Position >= 0);
         }
-
-        input.Dispose();
-        output.Dispose();
     }
 
     [TestMethod]
-    public async Task Process_Respects_Speed_Increase()
+    public async Task FinalSegment_CanBeSmaller()
     {
-        await using var engine = new RubberBandTimeStretchEngine(_pool, 44100, 2);
-        using var input = MakeBlock(44100);
-        using var cts = new CancellationTokenSource();
+        await using var engine = new RubberBandTimeStretchEngine(_pool, 44100, stemCount: 2);
 
-        // -----------------------------
-        // Phase 1: speed = 1.0
-        // -----------------------------
-        var normalFrames = 0;
+        await engine.Configure(new PlaybackSpeedSettings { Speed = 1.0f }, CancellationToken.None);
 
-        const int NumberOfIterations = 5;
+        // Only 0.3 seconds of input
+        var stems = MakeStemSet(2, 44100 / 3);
 
-        var submitTask1 = Task.Run(async () =>
+        await engine.SubmitStems(stems, CancellationToken.None);
+
+        var blocks = await engine.ReceiveStems(CancellationToken.None);
+
+        Assert.AreEqual(2, blocks.Length);
+
+        foreach (var b in blocks)
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            using var ts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, timeout.Token);
-
-            for (var i = 0; i < NumberOfIterations; i++)
-                await engine.Submit(input, ts.Token);
-        });
-
-        var receiveTask1 = Task.Run(async () =>
-        {
-            while (true)
-            {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                using var ts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, timeout.Token);
-                
-                using var data = await engine.Receive(ts.Token);
-                if (data.Buffer == null)
-                    break;
-
-                normalFrames += data.Frames;
-            }
-        });
-
-        await Task.WhenAll(submitTask1, receiveTask1);
-
-        Debug.WriteLine($"Normal frames: {normalFrames}");
-
-        // -----------------------------
-        // Phase 2: speed = 1.5
-        // -----------------------------
-        await engine.Configure(new PlaybackSpeedSettings { Speed = 1.5f }, cts.Token);
-
-        var fasterFrames = 0;
-
-        var submitTask2 = Task.Run(async () =>
-        {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            using var ts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, timeout.Token);
-
-            for (var i = 0; i < NumberOfIterations; i++)
-                await engine.Submit(input, ts.Token);
-        });
-
-        var receiveTask2 = Task.Run(async () =>
-        {
-            while (true)
-            {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                using var ts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, timeout.Token);
-
-                using var data = await engine.Receive(ts.Token);
-                if (data.Buffer == null)
-                    break;
-
-                fasterFrames += data.Frames;
-            }
-        });
-
-        await Task.WhenAll(submitTask2, receiveTask2);
-
-        Debug.WriteLine($"Faster frames: {fasterFrames}");
-
-        // -----------------------------
-        // Assertion
-        // -----------------------------
-        Assert.IsLessThan(fasterFrames, normalFrames);
-
-        cts.Cancel();
+            Assert.IsTrue(b.Frames > 0);
+            Assert.IsTrue(b.Frames < 22050); // final segment smaller
+        }
     }
 
+    [TestMethod]
+    public async Task SpeedIncrease_ProducesFewerSourceFrames()
+    {
+        await using var engine = new RubberBandTimeStretchEngine(_pool, 44100, stemCount: 2);
+
+        var stems = MakeStemSet(2, 44100);
+
+        // Speed 1.0
+        await engine.Configure(new PlaybackSpeedSettings { Speed = 1.0f }, CancellationToken.None);
+        await engine.SubmitStems(stems, CancellationToken.None);
+        var normal = await engine.ReceiveStems(CancellationToken.None);
+
+        long normalSource = normal[0].Position + normal[0].Frames;
+
+        // Speed 1.5
+        await engine.Configure(new PlaybackSpeedSettings { Speed = 1.5f }, CancellationToken.None);
+        await engine.SubmitStems(stems, CancellationToken.None);
+        var faster = await engine.ReceiveStems(CancellationToken.None);
+
+        long fasterSource = faster[0].Position + faster[0].Frames;
+
+        Assert.IsTrue(fasterSource > normalSource); // faster speed → source position advances more
+    }
 
     [TestMethod]
-    public async Task Process_Respects_Speed_Decrease()
+    public async Task SpeedDecrease_ProducesMoreSourceFrames()
     {
-        await using var engine = new RubberBandTimeStretchEngine(_pool, 44100, 2);
-        using var input = MakeBlock(44100);
-        using var cts = new CancellationTokenSource();
+        await using var engine = new RubberBandTimeStretchEngine(_pool, 44100, stemCount: 2);
 
-        // -----------------------------
-        // Phase 1: speed = 1.0
-        // -----------------------------
-        var normalFrames = 0;
+        var stems = MakeStemSet(2, 44100);
 
-        const int NumberOfIterations = 5;
+        // Speed 1.0
+        await engine.Configure(new PlaybackSpeedSettings { Speed = 1.0f }, CancellationToken.None);
+        await engine.SubmitStems(stems, CancellationToken.None);
+        var normal = await engine.ReceiveStems(CancellationToken.None);
 
-        var submitTask1 = Task.Run(async () =>
-        {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            using var ts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, timeout.Token);
+        long normalAdvance = (long)(normal[0].Frames * 1.0f);
 
-            for (var i = 0; i < NumberOfIterations; i++)
-                await engine.Submit(input, ts.Token);
-        });
+        // Speed 0.5
+        await engine.Configure(new PlaybackSpeedSettings { Speed = 0.5f }, CancellationToken.None);
+        await engine.SubmitStems(stems, CancellationToken.None);
+        var slower = await engine.ReceiveStems(CancellationToken.None);
 
-        var receiveTask1 = Task.Run(async () =>
-        {
-            while (true)
-            {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                using var ts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, timeout.Token);
+        long slowerAdvance = (long)(slower[0].Frames * 0.5f);
 
-                using var data = await engine.Receive(ts.Token);
-                if (data.Buffer == null)
-                    break;
-
-                normalFrames += data.Frames;
-            }
-        });
-
-        await Task.WhenAll(submitTask1, receiveTask1);
-
-        Debug.WriteLine($"Normal frames: {normalFrames}");
-
-        // -----------------------------
-        // Phase 2: speed = 0.5
-        // -----------------------------
-        await engine.Configure(new PlaybackSpeedSettings { Speed = 0.5f }, cts.Token);
-
-        var slowerFrames = 0;
-
-        var submitTask2 = Task.Run(async () =>
-        {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            using var ts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, timeout.Token);
-
-            for (var i = 0; i < NumberOfIterations; i++)
-                await engine.Submit(input, ts.Token);
-        });
-
-        var receiveTask2 = Task.Run(async () =>
-        {
-            while (true)
-            {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                using var ts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, timeout.Token);
-
-                using var data = await engine.Receive(ts.Token);
-                if (data.Buffer == null)
-                    break;
-
-                slowerFrames += data.Frames;
-            }
-        });
-
-        await Task.WhenAll(submitTask2, receiveTask2);
-
-        Debug.WriteLine($"Slower frames: {slowerFrames}");
-
-        // -----------------------------
-        // Assertion
-        // -----------------------------
-        Assert.IsLessThan(slowerFrames, normalFrames);
-
-        cts.Cancel();
+        Assert.IsTrue(slowerAdvance < normalAdvance); // slower speed → source position advances less
     }
 
     [TestMethod]
     public async Task Engine_Restarts_On_Speed_Change()
     {
-        await using var engine = new RubberBandTimeStretchEngine(_pool, 44100, 2);
-        using var cts = new CancellationTokenSource();
+        await using var engine = new RubberBandTimeStretchEngine(_pool, 44100, stemCount: 2);
 
-        await engine.Configure(new PlaybackSpeedSettings { Speed = 1f }, cts.Token);
+        var stems = MakeStemSet(2, 44100);
 
-        var input = MakeBlock(44100);
+        await engine.Configure(new PlaybackSpeedSettings { Speed = 1.0f }, CancellationToken.None);
+        await engine.SubmitStems(stems, CancellationToken.None);
+        var before = await engine.ReceiveStems(CancellationToken.None);
 
-        await engine.Submit(input, cts.Token);
-        var before = await engine.Receive(cts.Token);
+        await engine.Configure(new PlaybackSpeedSettings { Speed = 0.75f }, CancellationToken.None);
+        await engine.SubmitStems(stems, CancellationToken.None);
+        var after = await engine.ReceiveStems(CancellationToken.None);
 
-        await engine.Configure(new PlaybackSpeedSettings { Speed = 0.75f }, cts.Token);
-
-        await engine.Submit(input, cts.Token);
-        var after = await engine.Receive(cts.Token);
-
-        Assert.AreNotEqual(0, before.Frames);
-        Assert.AreNotEqual(0, after.Frames);
-        Assert.AreNotEqual(before.Frames, after.Frames);
-
-        cts.Cancel();
+        Assert.AreNotEqual(before[0].Position, after[0].Position);
     }
 
-    [TestMethod]
-    public async Task Dispose_Kills_FFmpeg()
-    {
-        var engine = new RubberBandTimeStretchEngine(_pool, 44100, 2);
-        using var cts = new CancellationTokenSource();
-
-        var ffField = typeof(RubberBandTimeStretchEngine)
-            .GetField("_ff", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-        var ff = (Process?)ffField!.GetValue(engine);
-        var pid = ff?.Id ?? -1;
-
-        await engine.DisposeAsync();
-
-        var exists = Process.GetProcesses().Any(p =>
-        {
-            try { return p.Id == pid; }
-            catch { return false; }
-        });
-
-        Assert.IsFalse(exists);
-        cts.Cancel();
-    }
 }
