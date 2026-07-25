@@ -3,10 +3,12 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ABStemPlayer.ViewModels"
              xmlns:conv="using:ABStemPlayer.Converters"
+             xmlns:av="clr-namespace:Avalonia;assembly=Avalonia.Base"
              x:DataType="vm:PlaybackViewModel"
              x:Class="ABStemPlayer.Views.PlaybackControls">
     <UserControl.Resources>
         <conv:BoolInvertConverter x:Key="BoolInvert" />
+        <conv:PlayPauseGeometryConverter x:Key="PlayPauseGeometry" />
     </UserControl.Resources>
 
     <Border Padding="8"
@@ -38,7 +40,8 @@
                             Width="40"
                             Height="40"
                             Grid.Column="0"
-                            Margin="0,0,6,0">
+                            Margin="0,0,6,0"
+                            ToolTip.Tip="Open File">
                         <Path Fill="#e0e0e0"
                               Stretch="None"
                               RenderTransformOrigin="0,0">
@@ -57,7 +60,8 @@
                             Width="40"
                             Height="40"
                             Grid.Column="1"
-                            Margin="0,0,6,0">
+                            Margin="0,0,6,0"
+                            ToolTip.Tip="Rewind">
                         <Path Fill="#e0e0e0"
                               Stretch="None"
                               RenderTransformOrigin="0,0">
@@ -72,50 +76,30 @@
                     </Button>
 
                     <!-- Play -->
-                    <Button Command="{Binding PlayCommand}"
-                            Width="40"
+                    <Button Width="40"
                             Height="40"
                             Grid.Column="2"
-                            Margin="0,0,6,0">
+                            Margin="0,0,6,0"
+                            ToolTip.Tip="Play/Pause"
+                            Command="{Binding PlayCommand}">
+    
                         <Path Fill="#e0e0e0"
                               Stretch="None"
-                              RenderTransformOrigin="0,0">
+                              RenderTransformOrigin="0,0"
+                              Data="{Binding IsPlaying, Converter={StaticResource PlayPauseGeometry}}">
                             <Path.RenderTransform>
                                 <TranslateTransform X="-8" Y="-8"/>
                             </Path.RenderTransform>
-
-                            <Path.Data>
-                                M 10 8 L 32 20 L 10 32 Z
-                            </Path.Data>
                         </Path>
                     </Button>
-
-                    <!-- Pause -->
-                    <Button Command="{Binding PauseCommand}"
-                            Width="40"
-                            Height="40"
-                            Grid.Column="3"
-                            Margin="0,0,6,0">
-                        <Path Fill="#e0e0e0"
-                              Stretch="None"
-                              RenderTransformOrigin="0,0">
-                            <Path.RenderTransform>
-                                <TranslateTransform X="-8" Y="-8"/>
-                            </Path.RenderTransform>
-
-                            <Path.Data>
-                                M 8 8 H 16 V 32 H 8 Z
-                                M 24 8 H 32 V 32 H 24 Z
-                            </Path.Data>
-                        </Path>
-                </Button>
 
                     <!-- Stop -->
                     <Button Command="{Binding StopCommand}"
                             Width="40"
                             Height="40"
                             Grid.Column="4"
-                            Margin="0,0,6,0">
+                            Margin="0,0,6,0"
+                            ToolTip.Tip="Stop">
                         <Path Fill="#e0e0e0"
                               Stretch="None"
                               RenderTransformOrigin="0,0">
@@ -133,7 +117,8 @@
                     <Button Command="{Binding FastForwardCommand}"
                             Width="40"
                             Height="40"
-                            Grid.Column="5">
+                            Grid.Column="5"
+                            ToolTip.Tip="Fast Forward">
                         <Path Fill="#e0e0e0"
                               Stretch="None"
                               RenderTransformOrigin="0,0">
@@ -189,6 +174,8 @@
 
                     <ToggleSwitch IsChecked="{Binding LoopEnabled}"
                                   Content="Loop"
+                                  OnContent=""
+                                  OffContent=""
                                   VerticalAlignment="Center"
                                   Grid.Column="0"
                                   Margin="0,0,6,0"/>
@@ -197,7 +184,8 @@
                             Width="40"
                             Height="40"
                             Grid.Column="1"
-                            Margin="0,0,6,0">
+                            Margin="0,0,6,0"
+                            ToolTip.Tip="Set Loop Point A">
                         <Grid>
                             <Path Fill="#0080ff"
                                   Data="M 26 8 
@@ -212,7 +200,8 @@ L 26 8" />
                     <Button Command="{Binding SetPointBCommand}"
                             Width="40"
                             Height="40"
-                            Grid.Column="2">
+                            Grid.Column="2"
+                            ToolTip.Tip="Set Loop Point B">
                         <Grid>
                             <Path Fill="#0080ff"
                                   Data="M 14 8

@@ -36,7 +36,6 @@ public sealed partial class PlaybackViewModel : ObservableObject
 
     public ICommand OpenFileCommand    { get; }
     public ICommand PlayCommand        { get; }
-    public ICommand PauseCommand       { get; }
     public ICommand StopCommand        { get; }
     public ICommand RewindCommand      { get; }
     public ICommand FastForwardCommand { get; }
@@ -48,6 +47,7 @@ public sealed partial class PlaybackViewModel : ObservableObject
     // Playback properties
     // -----------------------------
 
+    [ObservableProperty] private bool           _isPlaying;
     [ObservableProperty] private bool           _loopEnabled;
     [ObservableProperty] private float          _playbackSpeed = 1f;
     [ObservableProperty] private TimeSpan       _currentTime;
@@ -83,8 +83,7 @@ public sealed partial class PlaybackViewModel : ObservableObject
 
         OpenFileCommand         = new AsyncRelayCommand(OpenFileAsync);
         PlayCommand             = new AsyncRelayCommand(OnPlay);
-        PauseCommand            = new AsyncRelayCommand(() => _engine.PauseAsync());
-        StopCommand             = new AsyncRelayCommand(async () => { await _engine.StopAsync(); await _engine.SeekAsync(TimeSpan.Zero); });
+        StopCommand             = new AsyncRelayCommand(OnStop);
 
         RewindCommand           = new AsyncRelayCommand(() => _engine.SeekAsync(CurrentTime - TimeSpan.FromSeconds(5)));
         FastForwardCommand      = new AsyncRelayCommand(() => _engine.SeekAsync(CurrentTime + TimeSpan.FromSeconds(5)));
@@ -123,6 +122,13 @@ public sealed partial class PlaybackViewModel : ObservableObject
 
     private async Task OnPlay()
     {
+        if (IsPlaying)
+        {
+            await _engine.PauseAsync();
+            IsPlaying = false;
+            return;
+        }
+            
         if (_engine.CurrentSession == null)
             return;
 
@@ -135,6 +141,14 @@ public sealed partial class PlaybackViewModel : ObservableObject
         await _engine.UpdatePlaybackSpeedAsync(new PlaybackSpeedSettings { Speed = PlaybackSpeed });
 
         await _engine.PlayAsync();
+        IsPlaying = true;
+    }
+
+    private async Task OnStop()
+    {
+        await _engine.StopAsync();
+        IsPlaying   = false;
+        CurrentTime = TimeSpan.Zero;
     }
 
     partial void OnMixerChanged(MixerViewModel? oldValue, MixerViewModel newValue)

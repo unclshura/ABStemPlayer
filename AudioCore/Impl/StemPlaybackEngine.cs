@@ -454,7 +454,7 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Debug.WriteLine($"StemPlaybackEngine: Error in StretchLoopAsync: {ex.Message}");
+            Msg($"StemPlaybackEngine: Error in StretchLoopAsync: {ex.Message}");
             try { pipeline.Cts?.Cancel(); } catch { }
         }
     }
