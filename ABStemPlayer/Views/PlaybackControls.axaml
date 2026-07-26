@@ -37,47 +37,43 @@
 
                     <!-- File Open -->
                     <Button Command="{Binding OpenFileCommand}"
-                            Width="40"
-                            Height="40"
+                            Width="32"
+                            Height="32"
+                            Background="Black"
                             Grid.Column="0"
                             Margin="0,0,6,0"
                             ToolTip.Tip="Open File">
                         <Path Fill="#e0e0e0"
                               Stretch="None"
                               RenderTransformOrigin="0,0">
-                            <Path.RenderTransform>
-                                <TranslateTransform X="-8" Y="-8"/>
-                            </Path.RenderTransform>
-
                             <Path.Data>
-                                M 6 10 H 18 L 22 14 H 34 V 30 H 6 Z
+                                M1 4C1 2.34315 2.34315 1 4 1H7.76393C8.90025 1 9.93904 1.64201 10.4472 2.65836L11.3416 4.44721C11.511 4.786 11.8573 5 12.2361 5H20C21.6569 5 23 6.34315 23 8V20C23 21.6569 21.6569 23 20 23H4C2.34315 23 1 21.6569 1 20V4ZM4 3C3.44772 3 3 3.44772 3 4V20C3 20.5523 3.44772 21 4 21H20C20.5523 21 21 20.5523 21 20V8C21 7.44772 20.5523 7 20 7H12.2361C11.0998 7 10.061 6.35799 9.55279 5.34164L8.65836 3.55279C8.48897 3.214 8.1427 3 7.76393 3H4Z
                             </Path.Data>
                         </Path>
                     </Button>
 
                     <!-- Rewind -->
                     <Button Command="{Binding RewindCommand}"
-                            Width="40"
-                            Height="40"
+                            Width="32"
+                            Height="32"
+                            Background="Black"
                             Grid.Column="1"
                             Margin="0,0,6,0"
                             ToolTip.Tip="Rewind">
                         <Path Fill="#e0e0e0"
                               Stretch="None"
                               RenderTransformOrigin="0,0">
-                            <Path.RenderTransform>
-                                <TranslateTransform X="-6" Y="-8"/>
-                            </Path.RenderTransform>
-
                             <Path.Data>
-                                M 30 8 L 10 20 L 30 32 Z M 18 8 L -2 20 L 18 32 Z
+                                M18.3956 19.7691C19.0541 20.2687 20 19.799 20 18.9724L20 5.02764C20 4.20106 19.0541 3.73137 18.3956 4.23095L9.20476 11.2033C8.67727 11.6035 8.67727 12.3965 9.20476 12.7967L18.3956 19.7691ZM22 18.9724C22 21.4521 19.1624 22.8612 17.1868 21.3625L7.99598 14.3901C6.41353 13.1896 6.41353 10.8104 7.99599 9.60994L17.1868 2.63757C19.1624 1.13885 22 2.5479 22 5.02764L22 18.9724Z
+                                M2 3C2 2.44772 2.44772 2 3 2C3.55228 2 4 2.44772 4 3V21C4 21.5523 3.55228 22 3 22C2.44772 22 2 21.5523 2 21V3Z
                             </Path.Data>
                         </Path>
                     </Button>
 
                     <!-- Play -->
-                    <Button Width="40"
-                            Height="40"
+                    <Button Width="32"
+                            Height="32"
+                            Background="Black"
                             Grid.Column="2"
                             Margin="0,0,6,0"
                             ToolTip.Tip="Play/Pause"
@@ -87,47 +83,39 @@
                               Stretch="None"
                               RenderTransformOrigin="0,0"
                               Data="{Binding IsPlaying, Converter={StaticResource PlayPauseGeometry}}">
-                            <Path.RenderTransform>
-                                <TranslateTransform X="-8" Y="-8"/>
-                            </Path.RenderTransform>
                         </Path>
                     </Button>
 
                     <!-- Stop -->
                     <Button Command="{Binding StopCommand}"
-                            Width="40"
-                            Height="40"
+                            Width="32"
+                            Height="32"
+                            Background="Black"
                             Grid.Column="4"
                             Margin="0,0,6,0"
                             ToolTip.Tip="Stop">
                         <Path Fill="#e0e0e0"
                               Stretch="None"
                               RenderTransformOrigin="0,0">
-                            <Path.RenderTransform>
-                                <TranslateTransform X="-8" Y="-8"/>
-                            </Path.RenderTransform>
-
                             <Path.Data>
-                                M 8 8 H 32 V 32 H 8 Z
+                                M22 5C22 3.34315 20.6569 2 19 2H5C3.34315 2 2 3.34315 2 5V19C2 20.6569 3.34315 22 5 22H19C20.6569 22 22 20.6569 22 19V5ZM20 5C20 4.44772 19.5523 4 19 4H5C4.44772 4 4 4.44772 4 5V19C4 19.5523 4.44772 20 5 20H19C19.5523 20 20 19.5523 20 19V5Z
                             </Path.Data>
                         </Path>
                     </Button>
 
                     <!-- Fast Forward -->
                     <Button Command="{Binding FastForwardCommand}"
-                            Width="40"
-                            Height="40"
+                            Width="32"
+                            Height="32"
+                            Background="Black"
                             Grid.Column="5"
                             ToolTip.Tip="Fast Forward">
                         <Path Fill="#e0e0e0"
                               Stretch="None"
                               RenderTransformOrigin="0,0">
-                            <Path.RenderTransform>
-                                <TranslateTransform X="-14" Y="-8"/>
-                            </Path.RenderTransform>
-
                             <Path.Data>
-                                M 10 8 L 30 20 L 10 32 Z M 22 8 L 42 20 L 22 32 Z
+                                M5.60439 4.23093C4.94586 3.73136 4 4.20105 4 5.02762V18.9724C4 19.799 4.94586 20.2686 5.60439 19.7691L14.7952 12.7967C15.3227 12.3965 15.3227 11.6035 14.7952 11.2033L5.60439 4.23093ZM2 5.02762C2 2.54789 4.83758 1.13883 6.81316 2.63755L16.004 9.60993C17.5865 10.8104 17.5865 13.1896 16.004 14.3901L6.81316 21.3625C4.83758 22.8612 2 21.4521 2 18.9724V5.02762Z
+                                M20 3C20 2.44772 20.4477 2 21 2C21.5523 2 22 2.44772 22 3V21C22 21.5523 21.5523 22 21 22C20.4477 22 20 21.5523 20 21V3Z
                             </Path.Data>
                         </Path>
                     </Button>
@@ -147,14 +135,14 @@
                                Foreground="#f0f0f0"
                                VerticalAlignment="Center"
                                Grid.Column="0"
-                               Margin="20,10,8,0"/>
+                               Margin="20,4,8,0"/>
 
                     <Slider Minimum="0.25"
                             Maximum="2.0"
                             Value="{Binding PlaybackSpeed}"
                             Width="260"
                             Grid.Column="1"
-                            Margin="0,10,8,0"/>
+                            Margin="0,4,8,0"/>
 
                     <TextBlock Text="{Binding PlaybackSpeed, StringFormat='x{0:F2}'}"
                                Foreground="#c0c0c0"
@@ -181,35 +169,39 @@
                                   Margin="0,0,6,0"/>
 
                     <Button Command="{Binding SetPointACommand}"
-                            Width="40"
-                            Height="40"
+                            Width="32"
+                            Height="32"
                             Grid.Column="1"
+                            Background="Black"
                             Margin="0,0,6,0"
                             ToolTip.Tip="Set Loop Point A">
                         <Grid>
-                            <Path Fill="#0080ff"
-                                  Data="M 26 8 
-L 26 32 
-L 14 32 
-L 24 20 
-L 14 8 
-L 26 8" />
+                            <Path Fill="#e0e0e0"
+                                  Stretch="None"
+                                  RenderTransformOrigin="0,0">
+                                <Path.Data>
+                                    M18.3956 19.7691C19.0541 20.2687 20 19.799 20 18.9724L20 5.02764C20 4.20106 19.0541 3.73137 18.3956 4.23095L9.20476 11.2033C8.67727 11.6035 8.67727 12.3965 9.20476 12.7967L18.3956 19.7691ZM22 18.9724C22 21.4521 19.1624 22.8612 17.1868 21.3625L7.99598 14.3901C6.41353 13.1896 6.41353 10.8104 7.99599 9.60994L17.1868 2.63757C19.1624 1.13885 22 2.5479 22 5.02764L22 18.9724Z
+                                    M2 3C2 2.44772 2.44772 2 3 2C3.55228 2 4 2.44772 4 3V21C4 21.5523 3.55228 22 3 22C2.44772 22 2 21.5523 2 21V3Z
+                                </Path.Data>
+                            </Path>
                         </Grid>
                     </Button>
 
                     <Button Command="{Binding SetPointBCommand}"
-                            Width="40"
-                            Height="40"
+                            Width="32"
+                            Height="32"
+                            Background="Black"
                             Grid.Column="2"
                             ToolTip.Tip="Set Loop Point B">
                         <Grid>
-                            <Path Fill="#0080ff"
-                                  Data="M 14 8
-L 14 32
-L 26 32
-L 16 20
-L 26 8
-L 14 8"/>
+                            <Path Fill="#e0e0e0"
+                                  Stretch="None"
+                                  RenderTransformOrigin="0,0">
+                                <Path.Data>
+                                    M5.60439 4.23093C4.94586 3.73136 4 4.20105 4 5.02762V18.9724C4 19.799 4.94586 20.2686 5.60439 19.7691L14.7952 12.7967C15.3227 12.3965 15.3227 11.6035 14.7952 11.2033L5.60439 4.23093ZM2 5.02762C2 2.54789 4.83758 1.13883 6.81316 2.63755L16.004 9.60993C17.5865 10.8104 17.5865 13.1896 16.004 14.3901L6.81316 21.3625C4.83758 22.8612 2 21.4521 2 18.9724V5.02762Z
+                                    M20 3C20 2.44772 20.4477 2 21 2C21.5523 2 22 2.44772 22 3V21C22 21.5523 21.5523 22 21 22C20.4477 22 20 21.5523 20 21V3Z
+                                </Path.Data>
+                            </Path>
                         </Grid>
                     </Button>
                 </Grid>
