@@ -47,7 +47,7 @@ public partial class WaveformBandViewModel : ObservableObject
             return;
         }
 
-        double ratio = current.TotalSeconds / total.TotalSeconds;
+        double ratio = current.TotalMicroseconds / total.TotalMicroseconds;
         PlaybackX = ratio * CanvasWidth;
     }
 

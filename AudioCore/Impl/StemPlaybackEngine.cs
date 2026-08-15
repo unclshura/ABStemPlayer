@@ -8,14 +8,14 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 {
     private sealed class PipelineState : IDisposable
     {
-        public IStemDecoder[] Decoders = Array.Empty<IStemDecoder>();
-        public bool OutputStarted;
+        public IStemDecoder[]           Decoders = Array.Empty<IStemDecoder>();
+        public bool                     OutputStarted;
         public CancellationTokenSource? Cts;
-        public Task? RenderTask;
+        public Task?                    RenderTask;
 
         public void Dispose()
         {
-            try { Cts?.Cancel(); } catch { }
+            try { Cts?.Cancel();  } catch { }
             try { Cts?.Dispose(); } catch { }
 
             foreach (var d in Decoders)
@@ -39,7 +39,6 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 
     private LoopRegion                   _loopRegion = new();
 
-    private long                         _decodedFramePosition;
     private long                         _loopStartFrames;
     private long                         _loopEndFrames;
 
@@ -96,7 +95,6 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
             }
 
             _pendingSeekFrames = 0;
-            _decodedFramePosition = 0;
         }
     }
 
@@ -126,7 +124,6 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
                 d.Seek(_pendingSeekFrames);
             }
 
-            _decodedFramePosition = _pendingSeekFrames;
         }
 
         _pipeline.RenderTask = Task.Run(() => RenderLoopAsync(_pipeline, _pipeline.Cts.Token));
@@ -163,7 +160,6 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
             if (!IsPlaying && _pipeline is null)
                 return;
 
-            _decodedFramePosition = 0;
             _pendingSeekFrames = 0;
 
             pipelineToDispose = _pipeline;
@@ -201,12 +197,6 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
             {
                 foreach (var d in _pipeline.Decoders)
                     d.Seek(frameIndex);
-
-                _decodedFramePosition = frameIndex;
-            }
-            else
-            {
-                _decodedFramePosition = frameIndex;
             }
         }
 
@@ -349,15 +339,9 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
                         try { d.Seek(loopStart); } catch { }
                     }
 
-                    lock (_stateLock)
-                        _decodedFramePosition = loopStart;
-
                     // continue decoding from the loop start
                     continue;
                 }
-
-                lock (_stateLock)
-                    _decodedFramePosition = nextPosition;
             }
         }
         catch { }
@@ -430,19 +414,7 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
                 _outputDevice.Write(mixed.Buffer.Span);
                 gotFirstBlock = true;
 
-                try
-                {
-                    double progress;
-                    lock (_stateLock)
-                    {
-                        var total = _session?.StemSet.TotalFrames ?? 1L;
-                        progress = (double)mixed.Position / Math.Max(total, 1L);
-                    }
-
-                    if (_progressReporter != null)
-                        await _progressReporter.ReportProgress(progress).ConfigureAwait(false);
-                }
-                catch { }
+                await ReportProgress(mixed).ConfigureAwait(false);
 
                 try { mixed.Dispose(); } catch { }
                 foreach (var b in stretchedBlocks)
@@ -457,6 +429,25 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
             Msg($"StemPlaybackEngine: Error in StretchLoopAsync: {ex.Message}");
             try { pipeline.Cts?.Cancel(); } catch { }
         }
+    }
+
+    private async Task ReportProgress(MixedAudioBlock mixed)
+    {
+        if (_progressReporter == null)
+            return;
+
+        try
+        {
+            double progress;
+            lock (_stateLock)
+            {
+                var total = _session?.StemSet.TotalFrames ?? 1L;
+                progress = (double)mixed.Position / Math.Max(total, 1L);
+            }
+
+            await _progressReporter.ReportProgress(progress).ConfigureAwait(false);
+        }
+        catch { }
     }
 
     private long TimeToFrames(TimeSpan time)

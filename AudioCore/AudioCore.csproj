@@ -3,9 +3,7 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <Authors>Alexander Shabarshov</Authors>
-    <Description>
-        Audio engine core for ABStemPlayer. Audio pipeline.
-    </Description>
+    <Description>Audio engine core for ABStemPlayer. Audio pipeline. </Description>
     <PackageProjectUrl>https://github.com/unclshura/ABStemPlayer</PackageProjectUrl>
     <PackageTags>audio, player, ab, guitar, drums, piano, stem, mixer, c#</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -34,8 +32,8 @@
   <PropertyGroup>
     <Version>1.0.0</Version>
     <BuildNumber>0</BuildNumber>
-    <SourceRevisionId>0000</SourceRevisionId>
-    <InformationalVersion>$(Version).$(BuildNumber)+$(SourceRevisionId)</InformationalVersion>
+    <SourceRevisionId></SourceRevisionId>
+    <InformationalVersion>$(Version).$(BuildNumber)$(SourceRevisionId)</InformationalVersion>
     <AssemblyVersion>$(Version)</AssemblyVersion>
     <FileVersion>$(Version).$(BuildNumber)</FileVersion>
   </PropertyGroup>

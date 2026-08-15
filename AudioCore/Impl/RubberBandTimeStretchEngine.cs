@@ -10,6 +10,15 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IAsyncDisp
     private readonly int             _sampleRate;
     private long[] _sourcePositions;
 
+    private sealed class SourceChunkInfo
+    {
+        public long SourcePosition;   // starting frame index in source stream
+        public int  SourceFrames;     // number of frames in this chunk
+    }
+
+    private readonly Queue<SourceChunkInfo>[] _pendingInput;
+    private double[] _fractionalInput;
+
     // One RubberBand/ffmpeg process per stem (each is stereo: 2 channels)
     private sealed class StemProcess : IDisposable
     {
@@ -51,6 +60,12 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IAsyncDisp
         _stemProcesses.Capacity = stemCount;
         _stemCount              = stemCount;
         _sourcePositions = new long[_stemCount];
+        _fractionalInput = new double[_stemCount];
+
+        _pendingInput = Enumerable.Range(0, _stemCount)
+            .Select(_ => new Queue<SourceChunkInfo>())
+            .ToArray();
+
     }
 
     public async Task Configure(PlaybackSpeedSettings settings, CancellationToken token)
@@ -75,32 +90,48 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IAsyncDisp
 
     public Task SubmitStems(IReadOnlyList<AudioBlock> stemBlocks, CancellationToken token)
     {
-        if ( stemBlocks.Count != _stemCount)
+        if (stemBlocks.Count != _stemCount)
             throw new ArgumentException($"Expected {_stemCount} stems, but got {stemBlocks.Count}.");
+
+        EnsureStemProcesses(stemBlocks.Count);
 
         // No-stretch path: just enqueue into per-stem rings
         if (Math.Abs(_speed - 1.0f) < 0.01f)
         {
-            EnsureStemProcesses(stemBlocks.Count);
-
             for (int i = 0; i < stemBlocks.Count; i++)
             {
-                var proc = _stemProcesses[i];
-                var bytes = MemoryMarshal.AsBytes(stemBlocks[i].Buffer.Span);
-                proc.Ring.Write(bytes, bytes.Length, token);
+                var block = stemBlocks[i];
+
+                // Track source position for passthrough mode
+                _pendingInput[i].Enqueue(new SourceChunkInfo
+                {
+                    SourcePosition = block.Position,
+                    SourceFrames = block.Frames
+                });
+
+                var bytes = MemoryMarshal.AsBytes(block.Buffer.Span);
+                _stemProcesses[i].Ring.Write(bytes, bytes.Length, token);
             }
 
             return Task.CompletedTask;
         }
 
         // Stretch path: one ffmpeg+rubberband per stem
-        EnsureStemProcesses(stemBlocks.Count);
         StartProcessesIfNeeded(stemBlocks.Count);
 
         for (int i = 0; i < stemBlocks.Count; i++)
         {
+            var block = stemBlocks[i];
+
+            // Track source position for stretched mode
+            _pendingInput[i].Enqueue(new SourceChunkInfo
+            {
+                SourcePosition = block.Position,
+                SourceFrames = block.Frames
+            });
+
             var proc  = _stemProcesses[i];
-            var span  = stemBlocks[i].Buffer.Span;
+            var span  = block.Buffer.Span;
             var bytes = MemoryMarshal.AsBytes(span);
 
             try
@@ -108,28 +139,30 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IAsyncDisp
                 if (token.IsCancellationRequested)
                     return Task.CompletedTask;
 
+                // Only write if ffmpeg is alive
                 if (proc.Stdin != null && !(proc.Ff?.Proc?.HasExited ?? true))
+                {
                     proc.Stdin.Write(bytes);
 
-                if (token.IsCancellationRequested)
-                    return Task.CompletedTask;
-                try
-                {
-                    proc.Stdin?.Flush();
-                }
-                catch (System.ObjectDisposedException)
-                {
-                    // process has exited
+                    try
+                    {
+                        proc.Stdin.Flush();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // ffmpeg exited early
+                    }
                 }
             }
             catch
             {
-                // ignore
+                // Ignore write errors (ffmpeg may exit early)
             }
         }
 
         return Task.CompletedTask;
     }
+
 
     public async Task<TimeStretchedAudioBlock[]> ReceiveStems(CancellationToken token)
     {
@@ -160,9 +193,9 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IAsyncDisp
                 return Array.Empty<TimeStretchedAudioBlock>();
 
             // Determine block size (final block may be smaller)
-            int bytesToRead = Math.Min(bytesPerBlock, available);
-            int samplesToRead = bytesToRead / sizeof(float);
-            int framesToRead  = samplesToRead / 2;
+            int bytesToRead    = Math.Min(bytesPerBlock, available);
+            int samplesToRead  = bytesToRead / sizeof(float);
+            int framesToRead   = samplesToRead / 2;
 
             // Allocate a temporary byte[] buffer (safe across await)
             byte[] temp = new byte[bytesToRead];
@@ -195,10 +228,10 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IAsyncDisp
             var outBytes = MemoryMarshal.AsBytes(outBuf.Span);
             temp.AsSpan().CopyTo(outBytes);
 
-            // Compute source position
-            long sourceFrames = (long)(framesToRead * _speed);
-            long sourcePos    = _sourcePositions[i];
-            _sourcePositions[i] += sourceFrames;
+            //
+            // *** Correct source-position mapping ***
+            //
+            long sourcePos = ComputeSourcePosition(i, framesToRead);
 
             result[i] = new TimeStretchedAudioBlock(
                 outBuf,
@@ -210,6 +243,54 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IAsyncDisp
 
         return result;
     }
+
+private long ComputeSourcePosition(int stemIndex, int outputFrames)
+    {
+        // inputFrames = outputFrames / speed
+        double neededInputFrames = outputFrames / _speed;
+
+        // Add fractional requirement
+        _fractionalInput[stemIndex] += neededInputFrames;
+
+        long sourcePos = 0;
+        bool first = true;
+
+        var queue = _pendingInput[stemIndex];
+
+        // If no input chunks exist (warm-up), return last known position
+        if (queue.Count == 0)
+            return _sourcePositions[stemIndex];
+
+        while (_fractionalInput[stemIndex] >= 1 && queue.Count > 0)
+        {
+            var chunk = queue.Peek();
+
+            int take = (int)Math.Min(chunk.SourceFrames, Math.Floor(_fractionalInput[stemIndex]));
+
+            if (take <= 0)
+                break;
+
+            if (first)
+            {
+                sourcePos = chunk.SourcePosition;
+                first = false;
+            }
+
+            chunk.SourceFrames -= take;
+            _fractionalInput[stemIndex] -= take;
+
+            if (chunk.SourceFrames == 0)
+                queue.Dequeue();
+        }
+
+        // If we consumed nothing (fraction < 1), use last known position
+        if (first)
+            sourcePos = _sourcePositions[stemIndex];
+
+        _sourcePositions[stemIndex] = sourcePos;
+        return sourcePos;
+    }
+
 
 
     private void EnsureStemProcesses(int stemCount)
