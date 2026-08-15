@@ -2,7 +2,7 @@ using AudioCore.Impl;
 
 namespace AudioCore.Models;
 
-public readonly struct AudioBlock : IDisposable
+public readonly struct AudioBlock : IAudioBlock, IDisposable
 {
     public AudioBuffer<float> Buffer { get; }
     public int SampleRate { get; }

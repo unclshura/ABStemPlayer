@@ -115,7 +115,7 @@ public sealed class RubberBandTimeStretchEngine : ITimeStretchEngine, IAsyncDisp
                     return Task.CompletedTask;
                 try
                 {
-                    proc.Stdin.Flush();
+                    proc.Stdin?.Flush();
                 }
                 catch (System.ObjectDisposedException)
                 {
