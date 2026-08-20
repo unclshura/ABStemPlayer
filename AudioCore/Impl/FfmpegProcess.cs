@@ -1,6 +1,7 @@
 ﻿using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using static AudioCore.Models.Tracer;
 
 namespace AudioCore.Impl;
 
@@ -19,15 +20,15 @@ public sealed class FfmpegProcess : IDisposable
 
     public FfmpegProcess(string name, string commandLine, bool redirectOutput = true, bool redirectInput = true)
     {
-        _name = name;
-        _commandLine = commandLine;
+        _name           = name;
+        _commandLine    = commandLine;
         _redirectOutput = redirectOutput;
-        _redirectInput = redirectInput;
+        _redirectInput  = redirectInput;
     }
 
     public void StartProcess()
     {
-        Debug.WriteLine($"{_name}: Starting ffmpeg process: {_commandLine.Replace("\r", "").Replace("\n", " ").Replace("\t", " ")}");
+        Msg($"{_name}: Starting ffmpeg process: {_commandLine.Replace("\r", "").Replace("\n", " ").Replace("\t", " ")}");
 
         var psi = new ProcessStartInfo
         {
@@ -119,7 +120,7 @@ public sealed class FfmpegProcess : IDisposable
     private void DisposeProcessOnly()
     {
         if (Proc != null)
-            Debug.WriteLine($"{_name}: Disposing ffmpeg process");
+            Msg($"{_name}: Disposing ffmpeg process");
 
         try { Stdout?.Dispose(); Stdout = null; } catch { }
         try { Stdin?.Dispose(); Stdin = null; } catch { }

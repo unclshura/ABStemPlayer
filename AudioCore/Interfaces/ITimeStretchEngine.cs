@@ -10,7 +10,7 @@ public sealed class PlaybackSpeedSettings
 
 public interface ITimeStretchEngine
 {
-    Task Configure(PlaybackSpeedSettings settings, CancellationToken token);
+    Task Configure(PlaybackSpeedSettings settings, CancellationToken globalToken = default);
 
     // Streaming block processing
     Task IsReadyToAcceptStems(CancellationToken token);

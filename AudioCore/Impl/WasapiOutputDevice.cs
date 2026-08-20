@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
 using NAudio.Dmo;
 using NAudio.Wave;
+using static AudioCore.Models.Tracer;
 
 namespace AudioCore.Impl;
 

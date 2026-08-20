@@ -54,8 +54,8 @@ public sealed partial class PlaybackViewModel : ObservableObject
     [ObservableProperty] private TimeSpan       _totalTime;
     [ObservableProperty] private MixerViewModel _mixer = null!;
 
-    public ObservableCollection<SegmentViewModel>      Segments { get; } = new();
-    public ObservableCollection<WaveformBandViewModel> Bands    { get; } = new();
+    public ObservableCollection<SegmentViewModel>      Segments { get; } = [];
+    public ObservableCollection<WaveformBandViewModel> Bands    { get; } = [];
     
 
     private TimeSpan? _loopA;

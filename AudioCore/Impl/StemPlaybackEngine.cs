@@ -48,6 +48,9 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
     private PipelineState?               _pipeline;
     private long                         _pendingSeekFrames;
 
+    private PlaybackSpeedSettings _currentSpeed = new(){ Speed = 1.0f };
+    private PlaybackSpeedSettings _prevSpeed    = new(){ Speed = 1.0f };
+
     public StemPlaybackEngine(
         IStemDecoderFactory stemDecoderFactory,
         IAudioOutputDevice outputDevice,
@@ -168,7 +171,10 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
 
         if (pipelineToDispose is not null)
         {
-            try { pipelineToDispose.Cts?.Cancel(); } catch { }
+            if (pipelineToDispose.Cts != null)
+            {
+                try { await pipelineToDispose.Cts.CancelAsync(); } catch { }
+            }
 
             var task = pipelineToDispose.RenderTask;
             if (task is not null && task.Id != Task.CurrentId)
@@ -207,7 +213,7 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
     {
         Trace(settings);
 
-        await _timeStretchEngine.Configure(settings, _pipeline?.Cts?.Token ?? CancellationToken.None).ConfigureAwait(false);
+        _currentSpeed = settings;
     }
 
     public Task UpdateMixerAsync(MixerSettings settings)
@@ -392,6 +398,12 @@ public sealed class StemPlaybackEngine : IStemPlaybackEngine, IDisposable
             var gotFirstBlock = false;
             while (!token.IsCancellationRequested)
             {
+                if ( _prevSpeed.Speed != _currentSpeed.Speed )
+                {
+                    await _timeStretchEngine.Configure(_currentSpeed, token).ConfigureAwait(false);
+                    _prevSpeed = _currentSpeed;
+                }
+
                 var stretchedBlocks = await _timeStretchEngine.ReceiveStems(token).ConfigureAwait(false);
 
                 if (stretchedBlocks == null || stretchedBlocks.Length == 0 || stretchedBlocks[0].Buffer == null)

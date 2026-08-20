@@ -25,11 +25,11 @@ public partial class WaveformBandViewModel : ObservableObject
     [ObservableProperty] private double _canvasHeight;
     [ObservableProperty] private Geometry? _waveformGeometry;
 
-    public ObservableCollection<WaveformBar> WaveformBars { get; } = new();
+    public ObservableCollection<WaveformBar> WaveformBars { get; } = [];
 
     [ObservableProperty] private double _playbackX;
 
-    public ObservableCollection<SegmentViewModel> Segments { get; } = new();
+    public ObservableCollection<SegmentViewModel> Segments { get; } = [];
 
     public TimeSpan Duration { get; set; }
     public string DurationFormatted => Duration.ToString("mm\\:ss");

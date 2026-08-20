@@ -2,7 +2,7 @@ using System.Buffers;
 
 namespace AudioCore.Impl;
 
-public class GenericBufferPool<T>
+public class GenericBufferPool<T> where T : unmanaged
 {
     private readonly ArrayPool<T> _pool = ArrayPool<T>.Shared;
 

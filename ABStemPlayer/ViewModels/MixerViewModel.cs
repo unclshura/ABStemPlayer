@@ -4,7 +4,7 @@ namespace ABStemPlayer.ViewModels;
 
 public sealed class MixerViewModel
 {
-    public ObservableCollection<StemChannelViewModel> Stems { get; } = new();
+    public ObservableCollection<StemChannelViewModel> Stems { get; } = [];
 
     public MixerViewModel()
     {
